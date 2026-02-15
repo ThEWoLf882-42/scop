@@ -1,4 +1,4 @@
-NAME := scop
+NAME := scop.app
 
 CXX := c++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2

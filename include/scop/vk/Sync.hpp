@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <utility>
 
 namespace scop::vk
 {
@@ -40,6 +41,10 @@ namespace scop::vk
 		VkSemaphore imageAvailable() const { return imageAvailable_; }
 		VkSemaphore renderFinished() const { return renderFinished_; }
 		VkFence inFlight() const { return inFlight_; }
+
+		// Pointer getters (for vkWaitForFences/vkResetFences signatures)
+		const VkFence *inFlightPtr() const { return &inFlight_; }
+		VkFence *inFlightPtr() { return &inFlight_; }
 
 	private:
 		VkDevice device_ = VK_NULL_HANDLE;

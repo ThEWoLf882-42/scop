@@ -60,8 +60,8 @@ namespace scop
 			{
 				glfwPollEvents();
 
-				vkWaitForFences(ctx.device(), 1, &sync.inFlight(), VK_TRUE, UINT64_MAX);
-				vkResetFences(ctx.device(), 1, &sync.inFlight());
+				vkWaitForFences(ctx.device(), 1, sync.inFlightPtr(), VK_TRUE, UINT64_MAX);
+				vkResetFences(ctx.device(), 1, sync.inFlightPtr());
 
 				uint32_t imageIndex = 0;
 				if (vkAcquireNextImageKHR(ctx.device(), swap.handle(), UINT64_MAX,
@@ -101,7 +101,9 @@ namespace scop
 				if (glfwGetKey(ctx.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
 					glfwSetWindowShouldClose(ctx.window(), GLFW_TRUE);
 			}
-			// RAII destructors handle cleanup automatically.
+
+			// ✅ Ensure no pending work before RAII destructors destroy resources
+			vkDeviceWaitIdle(ctx.device());
 		}
 		catch (const std::exception &e)
 		{
