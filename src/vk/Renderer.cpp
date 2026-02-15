@@ -16,34 +16,57 @@ namespace
 	struct alignas(16) UBOData
 	{
 		scop::math::Mat4 mvp;
+		scop::math::Mat4 model;
+		float lightDir[4];
+		float baseColor[4];
 	};
 
 	scop::io::MeshData makeCube()
 	{
 		using scop::vk::Vertex;
 
-		const std::vector<Vertex> v = {
-			{{-0.5f, -0.5f, -0.5f}, {1.f, 0.f, 0.f}},
-			{{0.5f, -0.5f, -0.5f}, {0.f, 1.f, 0.f}},
-			{{0.5f, 0.5f, -0.5f}, {0.f, 0.f, 1.f}},
-			{{-0.5f, 0.5f, -0.5f}, {1.f, 1.f, 0.f}},
-			{{-0.5f, -0.5f, 0.5f}, {1.f, 0.f, 1.f}},
-			{{0.5f, -0.5f, 0.5f}, {0.f, 1.f, 1.f}},
-			{{0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}},
-			{{-0.5f, 0.5f, 0.5f}, {0.2f, 0.2f, 0.2f}},
+		std::vector<Vertex> v;
+		v.reserve(24);
+
+		auto pushFace = [&](float nx, float ny, float nz,
+							float ax, float ay, float az,
+							float bx, float by, float bz,
+							float cx, float cy, float cz,
+							float dx, float dy, float dz)
+		{
+			Vertex A{{ax, ay, az}, {nx, ny, nz}};
+			Vertex B{{bx, by, bz}, {nx, ny, nz}};
+			Vertex C{{cx, cy, cz}, {nx, ny, nz}};
+			Vertex D{{dx, dy, dz}, {nx, ny, nz}};
+			v.push_back(A);
+			v.push_back(B);
+			v.push_back(C);
+			v.push_back(D);
 		};
 
-		const std::vector<uint32_t> idx = {
-			0, 1, 2, 2, 3, 0,
-			1, 5, 6, 6, 2, 1,
-			5, 4, 7, 7, 6, 5,
-			4, 0, 3, 3, 7, 4,
-			3, 2, 6, 6, 7, 3,
-			4, 5, 1, 1, 0, 4};
+		pushFace(0, 0, 1, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f);
+		pushFace(0, 0, -1, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f);
+		pushFace(1, 0, 0, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f);
+		pushFace(-1, 0, 0, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f);
+		pushFace(0, 1, 0, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f);
+		pushFace(0, -1, 0, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f);
+
+		std::vector<uint32_t> idx;
+		idx.reserve(36);
+		for (uint32_t f = 0; f < 6; ++f)
+		{
+			uint32_t base = f * 4;
+			idx.push_back(base + 0);
+			idx.push_back(base + 1);
+			idx.push_back(base + 2);
+			idx.push_back(base + 2);
+			idx.push_back(base + 3);
+			idx.push_back(base + 0);
+		}
 
 		scop::io::MeshData m;
-		m.vertices = v;
-		m.indices = idx;
+		m.vertices = std::move(v);
+		m.indices = std::move(idx);
 		return m;
 	}
 
@@ -92,7 +115,6 @@ namespace scop::vk
 		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
 
 		recreateSwapchain();
-
 		lastTime_ = glfwGetTime();
 	}
 
@@ -214,7 +236,19 @@ namespace scop::vk
 			scop::math::Mat4::perspective(45.0f * 3.14159265f / 180.0f, aspect, 0.1f, 50.0f, true);
 
 		UBOData u{};
+		u.model = model;
 		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
+
+		u.lightDir[0] = 0.6f;
+		u.lightDir[1] = -1.0f;
+		u.lightDir[2] = 0.4f;
+		u.lightDir[3] = 0.0f;
+
+		u.baseColor[0] = 0.85f;
+		u.baseColor[1] = 0.85f;
+		u.baseColor[2] = 0.90f;
+		u.baseColor[3] = 0.0f;
+
 		ubos_.at(imageIndex).update(&u, sizeof(u));
 
 		if (presenter_.submitPresent(imageIndex) == FramePresenter::Result::OutOfDate)

@@ -1,11 +1,12 @@
 #include "scop/io/ObjLoader.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
-#include <limits>
-#include <cmath>
 
 namespace
 {
@@ -123,7 +124,7 @@ namespace
 		}
 	};
 
-} // namespace
+}
 
 namespace scop::io
 {
@@ -138,6 +139,7 @@ namespace scop::io
 		std::vector<Vec3> normals;
 
 		MeshData out;
+
 		std::unordered_map<Key, uint32_t, KeyHash> dedup;
 
 		std::string line;
@@ -180,10 +182,11 @@ namespace scop::io
 				refs.reserve(toks.size());
 				for (size_t i = 0; i < toks.size(); ++i)
 				{
-					refs.push_back(parseRef(toks[i],
-											static_cast<int>(positions.size()),
-											0,
-											static_cast<int>(normals.size())));
+					refs.push_back(parseRef(
+						toks[i],
+						static_cast<int>(positions.size()),
+						0,
+						static_cast<int>(normals.size())));
 				}
 
 				Vec3 faceN{0.f, 0.f, 1.f};
@@ -204,28 +207,45 @@ namespace scop::io
 
 				auto emitIndex = [&](const Ref &r) -> uint32_t
 				{
-					Key k{r.v, r.vt, r.vn};
-					auto it = dedup.find(k);
-					if (it != dedup.end())
-						return it->second;
-
 					const Vec3 p = positions[static_cast<size_t>(r.v)];
 					Vec3 n = faceN;
 					if (r.vn >= 0)
 						n = normals[static_cast<size_t>(r.vn)];
 
-					scop::vk::Vertex v{};
-					v.pos[0] = p.x;
-					v.pos[1] = p.y;
-					v.pos[2] = p.z;
-					v.color[0] = n.x * 0.5f + 0.5f;
-					v.color[1] = n.y * 0.5f + 0.5f;
-					v.color[2] = n.z * 0.5f + 0.5f;
+					if (r.vn >= 0)
+					{
+						Key k{r.v, r.vt, r.vn};
+						auto it = dedup.find(k);
+						if (it != dedup.end())
+							return it->second;
 
-					uint32_t newIndex = static_cast<uint32_t>(out.vertices.size());
-					out.vertices.push_back(v);
-					dedup.emplace(k, newIndex);
-					return newIndex;
+						scop::vk::Vertex v{};
+						v.pos[0] = p.x;
+						v.pos[1] = p.y;
+						v.pos[2] = p.z;
+						v.normal[0] = n.x;
+						v.normal[1] = n.y;
+						v.normal[2] = n.z;
+
+						uint32_t newIndex = static_cast<uint32_t>(out.vertices.size());
+						out.vertices.push_back(v);
+						dedup.emplace(k, newIndex);
+						return newIndex;
+					}
+					else
+					{
+						scop::vk::Vertex v{};
+						v.pos[0] = p.x;
+						v.pos[1] = p.y;
+						v.pos[2] = p.z;
+						v.normal[0] = n.x;
+						v.normal[1] = n.y;
+						v.normal[2] = n.z;
+
+						uint32_t newIndex = static_cast<uint32_t>(out.vertices.size());
+						out.vertices.push_back(v);
+						return newIndex;
+					}
 				};
 
 				const uint32_t i0 = emitIndex(refs[0]);
