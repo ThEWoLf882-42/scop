@@ -65,11 +65,23 @@ namespace scop::vk
 		float yawDeg_ = -90.0f;
 		float pitchDeg_ = 0.0f;
 
+		float fovDeg_ = 55.0f;
+
 		bool firstMouse_ = true;
 		double lastMouseX_ = 0.0;
 		double lastMouseY_ = 0.0;
 
+		bool cursorLocked_ = true;
+		bool escWasDown_ = false;
+		bool rWasDown_ = false;
+		bool spaceWasDown_ = false;
+
+		bool paused_ = false;
+		float modelTime_ = 0.0f;
+
 		double lastTime_ = 0.0;
+		double fpsAccum_ = 0.0;
+		int fpsFrames_ = 0;
 
 		bool framebufferResized_ = false;
 	};

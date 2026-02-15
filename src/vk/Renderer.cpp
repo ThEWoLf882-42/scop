@@ -8,9 +8,10 @@
 #include "scop/math/Mat4.hpp"
 
 #include <algorithm>
-#include <iostream>
-#include <vector>
 #include <cmath>
+#include <iostream>
+#include <sstream>
+#include <vector>
 
 namespace
 {
@@ -109,14 +110,28 @@ namespace scop::vk
 					self->framebufferResized_ = true;
 			});
 
+		// scroll zoom (FOV)
+		glfwSetScrollCallback(
+			ctx_.window(),
+			[](GLFWwindow *win, double /*xoff*/, double yoff)
+			{
+				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
+				if (!self)
+					return;
+				self->fovDeg_ -= static_cast<float>(yoff) * 2.0f;
+				self->fovDeg_ = std::clamp(self->fovDeg_, 20.0f, 90.0f);
+			});
+
 		// mouse look
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		cursorLocked_ = true;
+
 		glfwSetCursorPosCallback(
 			ctx_.window(),
 			[](GLFWwindow *win, double xpos, double ypos)
 			{
 				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
-				if (!self)
+				if (!self || !self->cursorLocked_)
 					return;
 
 				if (self->firstMouse_)
@@ -140,7 +155,7 @@ namespace scop::vk
 			});
 
 		// ---- Load mesh (once) ----
-		const std::string objPath = "assets/model.obj";
+		const std::string objPath = "assets/models/42.obj";
 		scop::io::MeshData mesh;
 
 		try
@@ -161,7 +176,11 @@ namespace scop::vk
 		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
 
 		recreateSwapchain();
+
 		lastTime_ = glfwGetTime();
+		fpsAccum_ = 0.0;
+		fpsFrames_ = 0;
+		modelTime_ = 0.0f;
 	}
 
 	void Renderer::recreateSwapchain()
@@ -245,7 +264,59 @@ namespace scop::vk
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
-		// build camera vectors from yaw/pitch
+		// FPS overlay (update title ~2 times/sec)
+		fpsAccum_ += dt;
+		fpsFrames_ += 1;
+		if (fpsAccum_ >= 0.5)
+		{
+			const double fps = static_cast<double>(fpsFrames_) / fpsAccum_;
+			fpsAccum_ = 0.0;
+			fpsFrames_ = 0;
+
+			std::ostringstream oss;
+			oss.precision(1);
+			oss.setf(std::ios::fixed);
+			oss << "scop | FPS " << fps
+				<< " | FOV " << fovDeg_
+				<< " | " << (cursorLocked_ ? "Mouse: LOCK" : "Mouse: FREE");
+			glfwSetWindowTitle(ctx_.window(), oss.str().c_str());
+		}
+
+		// ESC toggles mouse capture
+		const bool escDown = glfwGetKey(ctx_.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
+		if (escDown && !escWasDown_)
+		{
+			cursorLocked_ = !cursorLocked_;
+			glfwSetInputMode(ctx_.window(), GLFW_CURSOR,
+							 cursorLocked_ ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+			firstMouse_ = true; // avoid jump when re-locking
+		}
+		escWasDown_ = escDown;
+
+		// R resets camera
+		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
+		if (rDown && !rWasDown_)
+		{
+			camX_ = 0.0f;
+			camY_ = 0.0f;
+			camZ_ = 2.5f;
+			yawDeg_ = -90.0f;
+			pitchDeg_ = 0.0f;
+			fovDeg_ = 55.0f;
+			firstMouse_ = true;
+		}
+		rWasDown_ = rDown;
+
+		// SPACE pauses model rotation
+		const bool spDown = glfwGetKey(ctx_.window(), GLFW_KEY_SPACE) == GLFW_PRESS;
+		if (spDown && !spaceWasDown_)
+			paused_ = !paused_;
+		spaceWasDown_ = spDown;
+
+		if (!paused_)
+			modelTime_ += dt;
+
+		// build camera forward/right/up from yaw/pitch
 		const float yaw = degToRad(yawDeg_);
 		const float pitch = degToRad(pitchDeg_);
 
@@ -259,8 +330,11 @@ namespace scop::vk
 		scop::math::Vec3 right = scop::math::normalize(scop::math::cross(forward, worldUp));
 		scop::math::Vec3 up = scop::math::cross(right, forward);
 
-		// movement (WASD: forward/strafe, Q/E: down/up)
-		const float speed = 2.5f;
+		// movement
+		float speed = 2.5f;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+			speed *= 3.0f;
+
 		if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
 		{
 			camX_ += forward.x * speed * dt;
@@ -294,7 +368,7 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		// acquire image
+		// acquire
 		uint32_t imageIndex = 0;
 		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
 		{
@@ -306,7 +380,7 @@ namespace scop::vk
 		const float aspect = (ext.height == 0) ? 1.0f
 											   : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
-		const float t = static_cast<float>(now);
+		const float t = modelTime_;
 
 		const scop::math::Mat4 model =
 			scop::math::Mat4::mul(scop::math::Mat4::rotationY(t),
@@ -318,7 +392,7 @@ namespace scop::vk
 		const scop::math::Mat4 view = scop::math::Mat4::lookAt(eye, center, up);
 
 		const scop::math::Mat4 proj =
-			scop::math::Mat4::perspective(55.0f * 3.14159265f / 180.0f, aspect, 0.1f, 80.0f, true);
+			scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 80.0f, true);
 
 		UBOData u{};
 		u.model = model;
@@ -336,7 +410,7 @@ namespace scop::vk
 		u.baseColor[2] = 0.92f;
 		u.baseColor[3] = 0.0f;
 
-		// camera position for specular
+		// camera position (specular)
 		u.cameraPos[0] = camX_;
 		u.cameraPos[1] = camY_;
 		u.cameraPos[2] = camZ_;
