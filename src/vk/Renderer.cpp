@@ -8,6 +8,7 @@
 #include "scop/math/Mat4.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -28,6 +29,29 @@ namespace
 	};
 
 	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
+
+	static std::string toLower(std::string s)
+	{
+		for (size_t i = 0; i < s.size(); ++i)
+			s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+		return s;
+	}
+
+	static bool endsWithObj(const std::string &path)
+	{
+		const std::string p = toLower(path);
+		if (p.size() < 4)
+			return false;
+		return p.compare(p.size() - 4, 4, ".obj") == 0;
+	}
+
+	static std::string baseName(const std::string &path)
+	{
+		size_t p = path.find_last_of("/\\");
+		if (p == std::string::npos)
+			return path;
+		return path.substr(p + 1);
+	}
 
 	// Support both Vertex.pos being {x,y,z} or [0..2]
 	template <typename V>
@@ -148,6 +172,94 @@ namespace scop::vk
 		init(width, height, title);
 	}
 
+	bool Renderer::loadModelFromPath(const std::string &path)
+	{
+		scop::io::MeshData mesh;
+
+		try
+		{
+			mesh = scop::io::loadObj(path, true);
+			std::cerr << "Loaded OBJ: " << path
+					  << " verts=" << mesh.vertices.size()
+					  << " idx=" << mesh.indices.size() << "\n";
+		}
+		catch (const std::exception &e)
+		{
+			std::cerr << "OBJ load failed: " << e.what() << "\nUsing fallback cube.\n";
+			mesh = makeCube();
+		}
+
+		// ---- Auto-fit from AABB (always recompute when loading) ----
+		{
+			float minX = std::numeric_limits<float>::infinity();
+			float minY = std::numeric_limits<float>::infinity();
+			float minZ = std::numeric_limits<float>::infinity();
+			float maxX = -std::numeric_limits<float>::infinity();
+			float maxY = -std::numeric_limits<float>::infinity();
+			float maxZ = -std::numeric_limits<float>::infinity();
+
+			for (const auto &v : mesh.vertices)
+			{
+				minX = std::min(minX, px(v));
+				minY = std::min(minY, py(v));
+				minZ = std::min(minZ, pz(v));
+				maxX = std::max(maxX, px(v));
+				maxY = std::max(maxY, py(v));
+				maxZ = std::max(maxZ, pz(v));
+			}
+
+			const float cx = (minX + maxX) * 0.5f;
+			const float cz = (minZ + maxZ) * 0.5f;
+
+			fitOffsetX_ = -cx;	 // center X
+			fitOffsetY_ = -minY; // put bottom on Y=0
+			fitOffsetZ_ = -cz;	 // center Z
+
+			const float ex = (maxX - minX);
+			const float ey = (maxY - minY);
+			const float ez = (maxZ - minZ);
+			const float maxE = std::max(ex, std::max(ey, ez));
+
+			const float target = 2.0f; // “fits nicely” on grid
+			fitScale_ = (maxE > 0.000001f) ? (target / maxE) : 1.0f;
+
+			// keep toggles, but reset user scale for the new model
+			userScale_ = 1.0f;
+		}
+
+		// ---- Upload new VB/IB ----
+		vkDeviceWaitIdle(ctx_.device());
+
+		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
+		VertexBuffer newVB(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.vertices);
+		IndexBuffer newIB(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
+
+		vb_ = std::move(newVB);
+		ib_ = std::move(newIB);
+
+		modelLabel_ = baseName(path);
+
+		// If we already have pipelines/framebuffers, re-record command buffers
+		if (!fbs_.get().empty() && modelPipe_.pipeline() != VK_NULL_HANDLE)
+		{
+			cmds_.recordScene(modelPipe_.renderPass(),
+							  fbs_.get(),
+							  swap_.extent(),
+							  modelPipe_.pipeline(),
+							  modelPipe_.layout(),
+							  desc_.sets(),
+							  vb_.buffer(),
+							  ib_.buffer(),
+							  ib_.count(),
+							  VK_INDEX_TYPE_UINT32,
+							  linesPipe_.pipeline(),
+							  linesVB_.buffer(),
+							  linesVertexCount_);
+		}
+
+		return true;
+	}
+
 	void Renderer::init(int width, int height, const char *title)
 	{
 		ctx_.init(width, height, title);
@@ -204,73 +316,54 @@ namespace scop::vk
 				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
 			});
 
-		// ---- Load mesh ----
-		const std::string objPath = "assets/model.obj";
-		scop::io::MeshData mesh;
-
-		try
-		{
-			mesh = scop::io::loadObj(objPath, true);
-			std::cerr << "Loaded OBJ: " << objPath
-					  << " verts=" << mesh.vertices.size()
-					  << " idx=" << mesh.indices.size() << "\n";
-		}
-		catch (const std::exception &e)
-		{
-			std::cerr << "OBJ load failed: " << e.what() << "\nUsing fallback cube.\n";
-			mesh = makeCube();
-		}
-
-		// ---- Auto-fit from AABB ----
-		{
-			float minX = std::numeric_limits<float>::infinity();
-			float minY = std::numeric_limits<float>::infinity();
-			float minZ = std::numeric_limits<float>::infinity();
-			float maxX = -std::numeric_limits<float>::infinity();
-			float maxY = -std::numeric_limits<float>::infinity();
-			float maxZ = -std::numeric_limits<float>::infinity();
-
-			for (const auto &v : mesh.vertices)
+		// ---- Drag & Drop callback ----
+		glfwSetDropCallback(
+			ctx_.window(),
+			[](GLFWwindow *win, int count, const char **paths)
 			{
-				minX = std::min(minX, px(v));
-				minY = std::min(minY, py(v));
-				minZ = std::min(minZ, pz(v));
-				maxX = std::max(maxX, px(v));
-				maxY = std::max(maxY, py(v));
-				maxZ = std::max(maxZ, pz(v));
-			}
+				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
+				if (!self || count <= 0 || !paths)
+					return;
 
-			const float cx = (minX + maxX) * 0.5f;
-			const float cz = (minZ + maxZ) * 0.5f;
+				self->droppedObjs_.clear();
+				self->droppedIndex_ = 0;
 
-			// center XZ, put bottom on Y=0
-			fitOffsetX_ = -cx;
-			fitOffsetY_ = -minY;
-			fitOffsetZ_ = -cz;
+				for (int i = 0; i < count; ++i)
+				{
+					if (!paths[i])
+						continue;
+					std::string p = paths[i];
+					if (endsWithObj(p))
+						self->droppedObjs_.push_back(p);
+				}
 
-			const float ex = (maxX - minX);
-			const float ey = (maxY - minY);
-			const float ez = (maxZ - minZ);
-			const float maxE = std::max(ex, std::max(ey, ez));
+				if (self->droppedObjs_.empty())
+				{
+					std::cerr << "Dropped files, but none are .obj\n";
+					return;
+				}
 
-			const float target = 2.0f; // “fits nicely” size on grid
-			fitScale_ = (maxE > 0.000001f) ? (target / maxE) : 1.0f;
+				self->pendingPath_ = self->droppedObjs_[0];
+				self->hasPendingLoad_ = true;
 
-			userScale_ = 1.0f;
-			autoFit_ = true;
-
-			std::cerr << "AutoFit: offset=(" << fitOffsetX_ << "," << fitOffsetY_ << "," << fitOffsetZ_
-					  << ") scale=" << fitScale_ << "\n";
-		}
+				std::cerr << "Drop playlist (" << self->droppedObjs_.size() << "):\n";
+				for (size_t i = 0; i < self->droppedObjs_.size(); ++i)
+					std::cerr << "  [" << i << "] " << self->droppedObjs_[i] << "\n";
+				std::cerr << "Use [ and ] to cycle.\n";
+			});
 
 		// ---- Build grid/axes ----
 		const auto lines = makeGridAxes(10, 1.0f);
 		linesVertexCount_ = static_cast<uint32_t>(lines.size());
 
-		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.vertices);
-		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
-		linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
+		// Upload grid/axes VB once
+		{
+			Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
+			linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
+		}
+
+		// Load initial model
+		loadModelFromPath("assets/model.obj");
 
 		recreateSwapchain();
 
@@ -372,11 +465,40 @@ namespace scop::vk
 			return;
 		}
 
+		// apply pending drag&drop load (safe point)
+		if (hasPendingLoad_)
+		{
+			hasPendingLoad_ = false;
+			loadModelFromPath(pendingPath_);
+		}
+
 		const double now = glfwGetTime();
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
-		// --- Hotkeys (one-press toggles) ---
+		// Cycle playlist with [ and ]
+		const bool lbDown = glfwGetKey(ctx_.window(), GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+		if (lbDown && !lbWasDown_ && !droppedObjs_.empty())
+		{
+			if (droppedIndex_ == 0)
+				droppedIndex_ = droppedObjs_.size() - 1;
+			else
+				droppedIndex_--;
+			pendingPath_ = droppedObjs_[droppedIndex_];
+			hasPendingLoad_ = true;
+		}
+		lbWasDown_ = lbDown;
+
+		const bool rbDown = glfwGetKey(ctx_.window(), GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+		if (rbDown && !rbWasDown_ && !droppedObjs_.empty())
+		{
+			droppedIndex_ = (droppedIndex_ + 1) % droppedObjs_.size();
+			pendingPath_ = droppedObjs_[droppedIndex_];
+			hasPendingLoad_ = true;
+		}
+		rbWasDown_ = rbDown;
+
+		// ESC toggles mouse lock
 		const bool escDown = glfwGetKey(ctx_.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
 		if (escDown && !escWasDown_)
 		{
@@ -386,6 +508,7 @@ namespace scop::vk
 		}
 		escWasDown_ = escDown;
 
+		// R resets camera
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
 		{
@@ -399,6 +522,7 @@ namespace scop::vk
 		}
 		rWasDown_ = rDown;
 
+		// SPACE pauses
 		const bool spDown = glfwGetKey(ctx_.window(), GLFW_KEY_SPACE) == GLFW_PRESS;
 		if (spDown && !spaceWasDown_)
 			paused_ = !paused_;
@@ -416,13 +540,13 @@ namespace scop::vk
 			autoRotate_ = !autoRotate_;
 		tWasDown_ = tDown;
 
-		// C reset fit+scale
+		// C reset user scale
 		const bool cDown = glfwGetKey(ctx_.window(), GLFW_KEY_C) == GLFW_PRESS;
 		if (cDown && !cWasDown_)
 			userScale_ = 1.0f;
 		cWasDown_ = cDown;
 
-		// +/- scale
+		// +/- user scale
 		const bool plusDown = (glfwGetKey(ctx_.window(), GLFW_KEY_EQUAL) == GLFW_PRESS) ||
 							  (glfwGetKey(ctx_.window(), GLFW_KEY_KP_ADD) == GLFW_PRESS);
 		const bool minusDown = (glfwGetKey(ctx_.window(), GLFW_KEY_MINUS) == GLFW_PRESS) ||
@@ -472,7 +596,7 @@ namespace scop::vk
 		}
 		f1WasDown_ = f1Down;
 
-		// movement
+		// camera vectors
 		const float yaw = degToRad(yawDeg_);
 		const float pitch = degToRad(pitchDeg_);
 
@@ -526,7 +650,7 @@ namespace scop::vk
 		if (!paused_ && autoRotate_)
 			modelTime_ += dt;
 
-		// FPS title (include fit + scale)
+		// FPS title
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -538,9 +662,10 @@ namespace scop::vk
 			const float appliedScale = (autoFit_ ? fitScale_ : 1.0f) * userScale_;
 
 			std::ostringstream oss;
-			oss.precision(2);
 			oss.setf(std::ios::fixed);
-			oss << "scop | FPS " << fps
+			oss.precision(1);
+			oss << "scop | " << modelLabel_
+				<< " | FPS " << fps
 				<< " | " << (wireframe_ ? "WF" : "FILL")
 				<< " | " << (autoFit_ ? "FIT" : "RAW")
 				<< " | Scale " << appliedScale
@@ -568,10 +693,11 @@ namespace scop::vk
 		const scop::math::Mat4 proj = scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 200.0f, true);
 		const scop::math::Mat4 vp = scop::math::Mat4::mul(proj, view);
 
-		// model matrix = R * S * T(fitOffset)
 		const float appliedScale = (autoFit_ ? fitScale_ : 1.0f) * userScale_;
-		const scop::math::Mat4 Tfit = autoFit_ ? scop::math::Mat4::translation(fitOffsetX_, fitOffsetY_, fitOffsetZ_)
-											   : scop::math::Mat4::identity();
+		const scop::math::Mat4 Tfit = autoFit_
+										  ? scop::math::Mat4::translation(fitOffsetX_, fitOffsetY_, fitOffsetZ_)
+										  : scop::math::Mat4::identity();
+
 		const scop::math::Mat4 S = scop::math::Mat4::scale(appliedScale);
 
 		const scop::math::Mat4 R =

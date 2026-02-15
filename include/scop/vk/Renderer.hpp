@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "scop/vk/VkContext.hpp"
@@ -42,6 +43,7 @@ namespace scop::vk
 
 	private:
 		void recreateSwapchain();
+		bool loadModelFromPath(const std::string &path); // NEW
 
 		VkContext ctx_{};
 		Swapchain swap_{};
@@ -63,6 +65,15 @@ namespace scop::vk
 
 		Commands cmds_{};
 		FramePresenter presenter_{};
+
+		// ---- drag & drop playlist ----
+		std::vector<std::string> droppedObjs_;
+		size_t droppedIndex_ = 0;
+		bool hasPendingLoad_ = false;
+		std::string pendingPath_;
+		std::string modelLabel_ = "assets/model.obj";
+		bool lbWasDown_ = false;
+		bool rbWasDown_ = false;
 
 		// camera
 		float camX_ = 0.0f;
@@ -97,8 +108,8 @@ namespace scop::vk
 		float fitOffsetX_ = 0.0f;
 		float fitOffsetY_ = 0.0f;
 		float fitOffsetZ_ = 0.0f;
-		float fitScale_ = 1.0f;	 // computed from AABB
-		float userScale_ = 1.0f; // user multiplier
+		float fitScale_ = 1.0f;
+		float userScale_ = 1.0f;
 
 		bool autoRotate_ = true;
 
@@ -113,4 +124,4 @@ namespace scop::vk
 		bool framebufferResized_ = false;
 	};
 
-} // namespace scop::vk
+}
