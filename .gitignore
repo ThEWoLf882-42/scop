@@ -13,3 +13,4 @@ build/
 # Misc
 *.log
 scop.app
+input.*

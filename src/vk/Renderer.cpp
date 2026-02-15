@@ -163,9 +163,21 @@ namespace scop::vk
 	bool Renderer::loadModelFromPath(const std::string &path)
 	{
 		scop::io::MeshData mesh;
+		std::string texPath;
+
 		try
 		{
 			mesh = scop::io::loadObj(path, true);
+			texPath = mesh.material.mapKd;
+
+			matKd_[0] = mesh.material.Kd[0];
+			matKd_[1] = mesh.material.Kd[1];
+			matKd_[2] = mesh.material.Kd[2];
+			matAlpha_ = mesh.material.d;
+
+			const float ksAvg = (mesh.material.Ks[0] + mesh.material.Ks[1] + mesh.material.Ks[2]) / 3.0f;
+			matSpecStrength_ = std::clamp(ksAvg, 0.0f, 1.0f);
+			matShininess_ = std::max(mesh.material.Ns, 1.0f);
 		}
 		catch (const std::exception &e)
 		{
@@ -261,18 +273,19 @@ namespace scop::vk
 		// Texture (from MTL map_Kd)
 		try
 		{
-			if (!mesh.diffusePath.empty())
+			if (!texPath.empty())
 			{
 				tex_.load(ctx_.device(), ctx_.physicalDevice(),
 						  ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue(),
-						  mesh.diffusePath);
-				texLabel_ = baseName(mesh.diffusePath);
+						  texPath);
+				texLabel_ = baseName(texPath);
 			}
 			else
 			{
+				// no map_Kd in .mtl => keep white texture, but still use Kd color from MTL in shader
 				tex_.makeWhite(ctx_.device(), ctx_.physicalDevice(),
 							   ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-				texLabel_ = "white";
+				texLabel_ = "(none)";
 			}
 		}
 		catch (const std::exception &e)
@@ -312,7 +325,7 @@ namespace scop::vk
 		std::cerr << "Loaded OBJ: " << path
 				  << " verts=" << mesh.vertices.size()
 				  << " idx=" << mesh.indices.size()
-				  << " tex=" << (mesh.diffusePath.empty() ? "(none)" : mesh.diffusePath)
+				  << " tex=" << (texPath.empty() ? "(none)" : texPath)
 				  << "\n";
 		return true;
 	}
@@ -872,16 +885,16 @@ namespace scop::vk
 		u.lightDir[1] = -1.0f;
 		u.lightDir[2] = 0.4f;
 		u.lightDir[3] = 0.0f;
-		u.baseColor[0] = 0.82f;
-		u.baseColor[1] = 0.85f;
-		u.baseColor[2] = 0.92f;
-		u.baseColor[3] = 0.0f;
+		u.baseColor[0] = matKd_[0];
+		u.baseColor[1] = matKd_[1];
+		u.baseColor[2] = matKd_[2];
+		u.baseColor[3] = matAlpha_;
 		u.cameraPos[0] = camx;
 		u.cameraPos[1] = camy;
 		u.cameraPos[2] = camz;
 		u.cameraPos[3] = 0.0f;
-		u.spec[0] = 0.55f;
-		u.spec[1] = 64.0f;
+		u.spec[0] = matSpecStrength_;
+		u.spec[1] = matShininess_;
 		u.spec[2] = 0.0f;
 		u.spec[3] = 0.0f;
 

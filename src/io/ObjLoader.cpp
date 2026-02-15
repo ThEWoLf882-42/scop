@@ -4,6 +4,8 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cctype>
+#include <cmath>
+#include <vector>
 
 namespace scop::io
 {
@@ -36,6 +38,17 @@ namespace scop::io
 		return true;
 	}
 
+	static bool looksAbsolutePath(const std::string &p)
+	{
+		if (p.empty())
+			return false;
+		if (p[0] == '/')
+			return true;
+		if (p.size() > 2 && std::isalpha(static_cast<unsigned char>(p[0])) && p[1] == ':')
+			return true; // windows drive
+		return false;
+	}
+
 	struct V3
 	{
 		float x, y, z;
@@ -59,13 +72,13 @@ namespace scop::io
 	{
 		vi = ti = ni = 0;
 		// v/vt/vn or v//vn or v/vt or v
-		size_t a = tok.find('/');
+		const size_t a = tok.find('/');
 		if (a == std::string::npos)
 		{
 			vi = std::stoi(tok);
 			return;
 		}
-		size_t b = tok.find('/', a + 1);
+		const size_t b = tok.find('/', a + 1);
 		vi = std::stoi(tok.substr(0, a));
 		if (b == std::string::npos)
 		{
@@ -84,15 +97,76 @@ namespace scop::io
 			ni = std::stoi(s2);
 	}
 
-	static std::string parseMtlMapKd(const std::string &mtlPath, const std::string &wantMtlName)
+	static V3 faceNormal(const V3 &a, const V3 &b, const V3 &c)
 	{
+		const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+		const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+		V3 n{};
+		n.x = uy * vz - uz * vy;
+		n.y = uz * vx - ux * vz;
+		n.z = ux * vy - uy * vx;
+		const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+		if (len > 0.000001f)
+		{
+			n.x /= len;
+			n.y /= len;
+			n.z /= len;
+		}
+		return n;
+	}
+
+	// Tries to extract filename from map_Kd line that may contain options.
+	// For our needs: choose last token that doesn't start with '-'.
+	static std::string parseMapLine(const std::string &rest)
+	{
+		std::istringstream ss(rest);
+		std::string tok;
+		std::string lastPath;
+		while (ss >> tok)
+		{
+			if (!tok.empty() && tok[0] == '-')
+			{
+				// option; skip value(s) loosely by just continuing
+				continue;
+			}
+			lastPath = tok;
+		}
+		return lastPath;
+	}
+
+	static Material parseMtlFile(const std::string &mtlPath, const std::string &wantName)
+	{
+		Material out{};
 		std::ifstream f(mtlPath);
 		if (!f)
-			return "";
+			return out;
+
+		const std::string mtlDir = dirOf(mtlPath);
 
 		std::string line;
-		std::string current;
-		std::string firstMap;
+		std::string currentName;
+		Material current{};
+
+		auto commitIfWanted = [&](bool force)
+		{
+			if (currentName.empty())
+				return;
+			if (force)
+			{
+				if (out.name.empty())
+					out = current;
+				return;
+			}
+			if (!wantName.empty() && currentName == wantName)
+			{
+				out = current;
+			}
+			else if (wantName.empty() && out.name.empty())
+			{
+				// if no requested material, take the first
+				out = current;
+			}
+		};
 
 		while (std::getline(f, line))
 		{
@@ -102,20 +176,71 @@ namespace scop::io
 
 			if (startsWith(line, "newmtl "))
 			{
-				current = trimLeft(line.substr(7));
+				// commit previous
+				commitIfWanted(false);
+
+				currentName = trimLeft(line.substr(7));
+				current = Material{};
+				current.name = currentName;
+				continue;
+			}
+
+			if (currentName.empty())
+				continue;
+
+			if (startsWith(line, "Kd "))
+			{
+				std::istringstream ss(line.substr(3));
+				ss >> current.Kd[0] >> current.Kd[1] >> current.Kd[2];
+				continue;
+			}
+			if (startsWith(line, "Ks "))
+			{
+				std::istringstream ss(line.substr(3));
+				ss >> current.Ks[0] >> current.Ks[1] >> current.Ks[2];
+				continue;
+			}
+			if (startsWith(line, "Ns "))
+			{
+				std::istringstream ss(line.substr(3));
+				ss >> current.Ns;
+				continue;
+			}
+			if (startsWith(line, "d "))
+			{
+				std::istringstream ss(line.substr(2));
+				ss >> current.d;
+				continue;
+			}
+			if (startsWith(line, "Tr "))
+			{
+				// Tr is transparency; some tools use it as inverse of d
+				float tr = 0.f;
+				std::istringstream ss(line.substr(3));
+				ss >> tr;
+				current.d = 1.f - tr;
 				continue;
 			}
 			if (startsWith(line, "map_Kd "))
 			{
-				std::string rest = trimLeft(line.substr(7)); // may include spaces
-				if (firstMap.empty())
-					firstMap = rest;
-				if (!wantMtlName.empty() && current == wantMtlName)
-					return rest;
+				std::string rest = trimLeft(line.substr(7));
+				std::string tex = parseMapLine(rest);
+				if (!tex.empty())
+				{
+					if (looksAbsolutePath(tex))
+						current.mapKd = tex;
+					else
+						current.mapKd = mtlDir + tex;
+				}
+				continue;
 			}
 		}
 
-		return firstMap;
+		// commit last
+		commitIfWanted(true);
+
+		// If wantName was specified but not found, fallback to first (already handled by force/first logic)
+		return out;
 	}
 
 	MeshData loadObj(const std::string &objPath, bool triangulate)
@@ -189,6 +314,14 @@ namespace scop::io
 				if (face.size() < 3)
 					continue;
 
+				auto getPosFromTok = [&](const std::string &ftok) -> V3
+				{
+					int vi = 0, ti = 0, ni = 0;
+					parseFaceToken(ftok, vi, ti, ni);
+					const int p = fixIndex(vi, (int)positions.size());
+					return positions.at((size_t)p);
+				};
+
 				auto emitVertex = [&](const std::string &ftok, const V3 &faceNrm, bool hasFaceNrm) -> uint32_t
 				{
 					int vi = 0, ti = 0, ni = 0;
@@ -198,7 +331,7 @@ namespace scop::io
 					const int t = (ti != 0) ? fixIndex(ti, (int)uvs.size()) : -1;
 					const int n = (ni != 0) ? fixIndex(ni, (int)normals.size()) : -1;
 
-					// If no vn in file/token -> don't cache across faces (flat normal)
+					// If no vn in token -> do not cache across faces (flat normal)
 					if (n < 0)
 					{
 						scop::vk::Vertex v{};
@@ -263,35 +396,8 @@ namespace scop::io
 					return idx;
 				};
 
-				auto faceNormal = [&](const V3 &a, const V3 &b, const V3 &c) -> V3
-				{
-					const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
-					const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
-					V3 n{};
-					n.x = uy * vz - uz * vy;
-					n.y = uz * vx - ux * vz;
-					n.z = ux * vy - uy * vx;
-					const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-					if (len > 0.000001f)
-					{
-						n.x /= len;
-						n.y /= len;
-						n.z /= len;
-					}
-					return n;
-				};
-
-				auto getPosFromTok = [&](const std::string &ftok) -> V3
-				{
-					int vi = 0, ti = 0, ni = 0;
-					parseFaceToken(ftok, vi, ti, ni);
-					const int p = fixIndex(vi, (int)positions.size());
-					return positions.at((size_t)p);
-				};
-
 				if (triangulate && face.size() > 3)
 				{
-					// fan triangulation
 					for (size_t k = 1; k + 1 < face.size(); ++k)
 					{
 						const V3 A = getPosFromTok(face[0]);
@@ -306,7 +412,6 @@ namespace scop::io
 				}
 				else
 				{
-					// assume triangle
 					const V3 A = getPosFromTok(face[0]);
 					const V3 B = getPosFromTok(face[1]);
 					const V3 C = getPosFromTok(face[2]);
@@ -319,20 +424,11 @@ namespace scop::io
 			}
 		}
 
-		// MTL -> diffuse texture (map_Kd)
+		// MTL parsing (always use it if present)
 		if (!mtllib.empty())
 		{
-			const std::string mtlPath = objDir + mtllib;
-			const std::string mapKd = parseMtlMapKd(mtlPath, firstUseMtl);
-			if (!mapKd.empty())
-			{
-				const std::string mtlDir = dirOf(mtlPath);
-				// mapKd can already be relative or absolute; simplest: treat as relative to MTL dir unless it looks absolute
-				if (!mapKd.empty() && (mapKd[0] == '/' || (mapKd.size() > 2 && std::isalpha((unsigned char)mapKd[0]) && mapKd[1] == ':')))
-					out.diffusePath = mapKd;
-				else
-					out.diffusePath = mtlDir + mapKd;
-			}
+			const std::string mtlPath = looksAbsolutePath(mtllib) ? mtllib : (objDir + mtllib);
+			out.material = parseMtlFile(mtlPath, firstUseMtl);
 		}
 
 		return out;

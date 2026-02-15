@@ -138,6 +138,11 @@ namespace scop::vk
 		int fpsFrames_ = 0;
 
 		bool framebufferResized_ = false;
+
+		float matKd_[3] = {1.f, 1.f, 1.f};
+		float matAlpha_ = 1.f;
+		float matSpecStrength_ = 0.0f;
+		float matShininess_ = 32.0f;
 	};
 
 } // namespace scop::vk

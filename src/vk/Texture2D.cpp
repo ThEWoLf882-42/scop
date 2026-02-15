@@ -1,12 +1,11 @@
 #include "scop/vk/Texture2D.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
-
-// You must add this file:
-// include/scop/third_party/stb_image.h
-#define STB_IMAGE_IMPLEMENTATION
-#include "scop/third_party/stb_image.h"
+#include <string>
+#include <vector>
 
 namespace scop::vk
 {
@@ -213,6 +212,102 @@ namespace scop::vk
 		return s;
 	}
 
+	// ---- PPM (P6) loader ----
+	// Reads tokens while skipping comments.
+	static std::string nextToken(std::istream &in)
+	{
+		std::string tok;
+		char c = 0;
+
+		// skip whitespace + comments
+		while (in.get(c))
+		{
+			if (std::isspace(static_cast<unsigned char>(c)))
+				continue;
+			if (c == '#')
+			{
+				std::string dummy;
+				std::getline(in, dummy);
+				continue;
+			}
+			// start token
+			tok.push_back(c);
+			break;
+		}
+
+		// read rest of token
+		while (in.get(c))
+		{
+			if (std::isspace(static_cast<unsigned char>(c)))
+				break;
+			tok.push_back(c);
+		}
+		return tok;
+	}
+
+	static void loadPPM_P6_RGBA(const std::string &path, int &w, int &h, std::vector<uint8_t> &rgbaOut, bool flipY)
+	{
+		std::ifstream f(path, std::ios::binary);
+		if (!f)
+			throw std::runtime_error("PPM open failed: " + path);
+
+		const std::string magic = nextToken(f);
+		if (magic != "P6")
+			throw std::runtime_error("PPM is not P6: " + path);
+
+		const std::string sw = nextToken(f);
+		const std::string sh = nextToken(f);
+		const std::string sm = nextToken(f);
+
+		if (sw.empty() || sh.empty() || sm.empty())
+			throw std::runtime_error("PPM header parse failed: " + path);
+
+		w = std::stoi(sw);
+		h = std::stoi(sh);
+		const int maxv = std::stoi(sm);
+
+		if (w <= 0 || h <= 0)
+			throw std::runtime_error("PPM invalid size: " + path);
+		if (maxv <= 0 || maxv > 255)
+			throw std::runtime_error("PPM maxval unsupported (must be <=255): " + path);
+
+		// After maxval there is one whitespace; ensure we are positioned for binary.
+		// (nextToken already consumed one whitespace after token, but be safe)
+		char c = 0;
+		f.read(&c, 1);
+		if (!f)
+			throw std::runtime_error("PPM missing pixel data: " + path);
+		if (!std::isspace(static_cast<unsigned char>(c)))
+		{
+			// put back if it was actually pixel
+			f.seekg(-1, std::ios::cur);
+		}
+
+		const size_t rgbSize = static_cast<size_t>(w) * static_cast<size_t>(h) * 3;
+		std::vector<uint8_t> rgb(rgbSize);
+		f.read(reinterpret_cast<char *>(rgb.data()), (std::streamsize)rgbSize);
+		if (f.gcount() != (std::streamsize)rgbSize)
+			throw std::runtime_error("PPM pixel data truncated: " + path);
+
+		rgbaOut.assign(static_cast<size_t>(w) * static_cast<size_t>(h) * 4, 255);
+
+		for (int y = 0; y < h; ++y)
+		{
+			const int yy = flipY ? (h - 1 - y) : y;
+			const size_t srcRow = static_cast<size_t>(y) * static_cast<size_t>(w) * 3;
+			const size_t dstRow = static_cast<size_t>(yy) * static_cast<size_t>(w) * 4;
+			for (int x = 0; x < w; ++x)
+			{
+				const size_t si = srcRow + static_cast<size_t>(x) * 3;
+				const size_t di = dstRow + static_cast<size_t>(x) * 4;
+				rgbaOut[di + 0] = rgb[si + 0];
+				rgbaOut[di + 1] = rgb[si + 1];
+				rgbaOut[di + 2] = rgb[si + 2];
+				rgbaOut[di + 3] = 255;
+			}
+		}
+	}
+
 	Texture2D::~Texture2D() noexcept { destroy(); }
 
 	Texture2D::Texture2D(Texture2D &&o) noexcept { *this = std::move(o); }
@@ -257,7 +352,7 @@ namespace scop::vk
 
 	void Texture2D::makeWhite(VkDevice device, VkPhysicalDevice phys, uint32_t qf, VkQueue q)
 	{
-		const unsigned char px[4] = {255, 255, 255, 255};
+		const uint8_t px[4] = {255, 255, 255, 255};
 
 		destroy();
 		device_ = device;
@@ -288,7 +383,6 @@ namespace scop::vk
 		vkCmdCopyBufferToImage(cmd, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic);
 
 		transition(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
 		endCmd(device, q, pool, cmd);
 
 		vkDestroyBuffer(device, staging, nullptr);
@@ -300,15 +394,14 @@ namespace scop::vk
 
 	void Texture2D::load(VkDevice device, VkPhysicalDevice phys, uint32_t qf, VkQueue q, const std::string &path)
 	{
+		// Subject-safe: support PPM P6 only
 		destroy();
 		device_ = device;
 		format_ = pickFormat(phys);
 
-		int w = 0, h = 0, c = 0;
-		stbi_set_flip_vertically_on_load(1);
-		unsigned char *data = stbi_load(path.c_str(), &w, &h, &c, 4);
-		if (!data)
-			throw std::runtime_error("stbi_load failed: " + path);
+		int w = 0, h = 0;
+		std::vector<uint8_t> rgba;
+		loadPPM_P6_RGBA(path, w, h, rgba, true); // flipY=true to match common UV expectations
 
 		const VkDeviceSize size = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * 4;
 
@@ -320,10 +413,8 @@ namespace scop::vk
 
 		void *mapped = nullptr;
 		vkMapMemory(device, stagingMem, 0, size, 0, &mapped);
-		std::memcpy(mapped, data, static_cast<size_t>(size));
+		std::memcpy(mapped, rgba.data(), static_cast<size_t>(size));
 		vkUnmapMemory(device, stagingMem);
-
-		stbi_image_free(data);
 
 		createImage(device, phys, static_cast<uint32_t>(w), static_cast<uint32_t>(h), format_, image_, memory_);
 
@@ -339,7 +430,6 @@ namespace scop::vk
 		vkCmdCopyBufferToImage(cmd, staging, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic);
 
 		transition(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
 		endCmd(device, q, pool, cmd);
 
 		vkDestroyBuffer(device, staging, nullptr);
