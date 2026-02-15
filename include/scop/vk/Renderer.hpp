@@ -24,7 +24,6 @@ namespace scop::vk
 
 		Renderer(const Renderer &) = delete;
 		Renderer &operator=(const Renderer &) = delete;
-
 		Renderer(Renderer &&) = delete;
 		Renderer &operator=(Renderer &&) = delete;
 
@@ -54,6 +53,11 @@ namespace scop::vk
 
 		Commands cmds_{};
 		FramePresenter presenter_{};
+
+		float camX_ = 0.0f;
+		float camY_ = 0.0f;
+		float camZ_ = 2.5f;
+		double lastTime_ = 0.0;
 	};
 
 }

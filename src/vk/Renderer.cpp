@@ -8,24 +8,38 @@
 
 #include <cstdint>
 #include <vector>
+#include <cmath>
 
 namespace
 {
 
-	const std::vector<scop::vk::Vertex> kTriangle = {
-		{{0.0f, -0.6f}, {1.0f, 0.2f, 0.2f}},
-		{{0.6f, 0.6f}, {0.2f, 1.0f, 0.2f}},
-		{{-0.6f, 0.6f}, {0.2f, 0.4f, 1.0f}},
+	using scop::vk::Vertex;
+
+	const std::vector<Vertex> kCubeVerts = {
+		{{-0.5f, -0.5f, -0.5f}, {1.f, 0.f, 0.f}},
+		{{0.5f, -0.5f, -0.5f}, {0.f, 1.f, 0.f}},
+		{{0.5f, 0.5f, -0.5f}, {0.f, 0.f, 1.f}},
+		{{-0.5f, 0.5f, -0.5f}, {1.f, 1.f, 0.f}},
+		{{-0.5f, -0.5f, 0.5f}, {1.f, 0.f, 1.f}},
+		{{0.5f, -0.5f, 0.5f}, {0.f, 1.f, 1.f}},
+		{{0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}},
+		{{-0.5f, 0.5f, 0.5f}, {0.2f, 0.2f, 0.2f}},
 	};
 
-	const std::vector<uint16_t> kIndices = {0, 1, 2};
+	const std::vector<uint16_t> kCubeIdx = {
+		0, 1, 2, 2, 3, 0,
+		1, 5, 6, 6, 2, 1,
+		5, 4, 7, 7, 6, 5,
+		4, 0, 3, 3, 7, 4,
+		3, 2, 6, 6, 7, 3,
+		4, 5, 1, 1, 0, 4};
 
 	struct alignas(16) UBOData
 	{
 		scop::math::Mat4 mvp;
 	};
 
-} // namespace
+}
 
 namespace scop::vk
 {
@@ -52,8 +66,8 @@ namespace scop::vk
 		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
 
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kTriangle);
-		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kIndices);
+		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kCubeVerts);
+		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kCubeIdx);
 
 		cmds_ = Commands(ctx_.device(),
 						 ctx_.indices().graphicsFamily.value(),
@@ -72,6 +86,8 @@ namespace scop::vk
 									ctx_.presentQueue(),
 									swap_,
 									cmds_);
+
+		lastTime_ = glfwGetTime();
 	}
 
 	void Renderer::pollEvents() { glfwPollEvents(); }
@@ -88,9 +104,41 @@ namespace scop::vk
 
 	void Renderer::draw()
 	{
-		const float t = static_cast<float>(glfwGetTime());
+		const double now = glfwGetTime();
+		const float dt = static_cast<float>(now - lastTime_);
+		lastTime_ = now;
+
+		const float speed = 2.0f;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
+			camZ_ -= speed * dt;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
+			camZ_ += speed * dt;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
+			camX_ -= speed * dt;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
+			camX_ += speed * dt;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
+			camY_ -= speed * dt;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
+			camY_ += speed * dt;
+
+		const VkExtent2D ext = swap_.extent();
+		const float aspect = (ext.height == 0) ? 1.0f : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
+
+		const float t = static_cast<float>(now);
+
+		const scop::math::Mat4 model =
+			scop::math::Mat4::mul(scop::math::Mat4::rotationY(t),
+								  scop::math::Mat4::rotationX(t * 0.7f));
+
+		const scop::math::Mat4 view =
+			scop::math::Mat4::translation(-camX_, -camY_, -camZ_);
+
+		const scop::math::Mat4 proj =
+			scop::math::Mat4::perspective(45.0f * 3.14159265f / 180.0f, aspect, 0.1f, 50.0f, true);
+
 		UBOData u{};
-		u.mvp = scop::math::Mat4::rotationZ(t);
+		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
 		ubo_.update(&u, sizeof(u));
 
 		presenter_.draw();

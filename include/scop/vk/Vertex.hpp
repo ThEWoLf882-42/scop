@@ -1,4 +1,5 @@
 #pragma once
+
 #include <array>
 #include <cstddef>
 #include <vulkan/vulkan.h>
@@ -8,7 +9,7 @@ namespace scop::vk
 
 	struct Vertex
 	{
-		float pos[2];
+		float pos[3];
 		float color[3];
 
 		static VkVertexInputBindingDescription bindingDescription()
@@ -26,13 +27,13 @@ namespace scop::vk
 
 			a[0].binding = 0;
 			a[0].location = 0;
-			a[0].format = VK_FORMAT_R32G32_SFLOAT;
-			a[0].offset = offsetof(Vertex, pos);
+			a[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+			a[0].offset = static_cast<uint32_t>(offsetof(Vertex, pos));
 
 			a[1].binding = 0;
 			a[1].location = 1;
 			a[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-			a[1].offset = offsetof(Vertex, color);
+			a[1].offset = static_cast<uint32_t>(offsetof(Vertex, color));
 
 			return a;
 		}
