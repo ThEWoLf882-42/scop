@@ -11,6 +11,7 @@ namespace scop::vk
 	{
 		float pos[3];
 		float normal[3];
+		float uv[2];
 
 		static VkVertexInputBindingDescription bindingDescription()
 		{
@@ -34,6 +35,11 @@ namespace scop::vk
 			a[1].location = 1;
 			a[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 			a[1].offset = static_cast<uint32_t>(offsetof(Vertex, normal));
+
+			a[2].binding = 0;
+			a[2].location = 2;
+			a[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+			a[2].offset = static_cast<uint32_t>(offsetof(Vertex, uv));
 
 			return a;
 		}

@@ -1,303 +1,341 @@
 #include "scop/io/ObjLoader.hpp"
-
-#include <algorithm>
-#include <cmath>
 #include <fstream>
-#include <limits>
 #include <sstream>
-#include <stdexcept>
 #include <unordered_map>
-
-namespace
-{
-
-	struct Vec3
-	{
-		float x, y, z;
-	};
-
-	static Vec3 sub(const Vec3 &a, const Vec3 &b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-	static Vec3 cross(const Vec3 &a, const Vec3 &b)
-	{
-		return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-	}
-	static float len(const Vec3 &v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
-	static Vec3 norm(const Vec3 &v)
-	{
-		float l = len(v);
-		if (l <= 0.0f)
-			return {0.f, 0.f, 1.f};
-		return {v.x / l, v.y / l, v.z / l};
-	}
-
-	static int fixIndex(int idx, int size)
-	{
-		if (idx > 0)
-			return idx - 1;
-		if (idx < 0)
-			return size + idx;
-		return -1;
-	}
-
-	struct Ref
-	{
-		int v = -1;
-		int vt = -1;
-		int vn = -1;
-	};
-
-	static Ref parseRef(const std::string &tok, int vCount, int vtCount, int vnCount)
-	{
-		Ref r{};
-		int a = 0, b = 0, c = 0;
-		bool hasA = false, hasB = false, hasC = false;
-
-		size_t s1 = tok.find('/');
-		if (s1 == std::string::npos)
-		{
-			a = std::stoi(tok);
-			hasA = true;
-		}
-		else
-		{
-			std::string p0 = tok.substr(0, s1);
-			if (!p0.empty())
-			{
-				a = std::stoi(p0);
-				hasA = true;
-			}
-
-			size_t s2 = tok.find('/', s1 + 1);
-			if (s2 == std::string::npos)
-			{
-				std::string p1 = tok.substr(s1 + 1);
-				if (!p1.empty())
-				{
-					b = std::stoi(p1);
-					hasB = true;
-				}
-			}
-			else
-			{
-				std::string p1 = tok.substr(s1 + 1, s2 - (s1 + 1));
-				std::string p2 = tok.substr(s2 + 1);
-				if (!p1.empty())
-				{
-					b = std::stoi(p1);
-					hasB = true;
-				}
-				if (!p2.empty())
-				{
-					c = std::stoi(p2);
-					hasC = true;
-				}
-			}
-		}
-
-		if (hasA)
-			r.v = fixIndex(a, vCount);
-		if (hasB)
-			r.vt = fixIndex(b, vtCount);
-		if (hasC)
-			r.vn = fixIndex(c, vnCount);
-
-		return r;
-	}
-
-	struct Key
-	{
-		int v, vt, vn;
-		bool operator==(const Key &o) const { return v == o.v && vt == o.vt && vn == o.vn; }
-	};
-
-	struct KeyHash
-	{
-		std::size_t operator()(const Key &k) const noexcept
-		{
-			std::size_t h1 = std::hash<int>{}(k.v);
-			std::size_t h2 = std::hash<int>{}(k.vt);
-			std::size_t h3 = std::hash<int>{}(k.vn);
-			std::size_t h = h1;
-			h ^= (h2 + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2));
-			h ^= (h3 + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2));
-			return h;
-		}
-	};
-
-}
+#include <stdexcept>
+#include <cctype>
 
 namespace scop::io
 {
 
-	MeshData loadObj(const std::string &path, bool normalizeToUnit)
+	static std::string dirOf(const std::string &p)
 	{
-		std::ifstream f(path.c_str());
-		if (!f.is_open())
-			throw std::runtime_error("OBJ: failed to open: " + path);
+		const size_t s = p.find_last_of("/\\");
+		if (s == std::string::npos)
+			return "";
+		return p.substr(0, s + 1);
+	}
 
-		std::vector<Vec3> positions;
-		std::vector<Vec3> normals;
+	static std::string trimLeft(std::string s)
+	{
+		size_t i = 0;
+		while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i])))
+			++i;
+		return s.substr(i);
+	}
 
-		MeshData out;
+	static bool startsWith(const std::string &s, const char *pfx)
+	{
+		size_t i = 0;
+		while (pfx[i])
+		{
+			if (i >= s.size() || s[i] != pfx[i])
+				return false;
+			++i;
+		}
+		return true;
+	}
 
-		std::unordered_map<Key, uint32_t, KeyHash> dedup;
+	struct V3
+	{
+		float x, y, z;
+	};
+	struct V2
+	{
+		float u, v;
+	};
+
+	static int fixIndex(int idx, int n)
+	{
+		// OBJ indices: 1..n, or negative = relative to end
+		if (idx > 0)
+			return idx - 1;
+		if (idx < 0)
+			return n + idx;
+		return -1;
+	}
+
+	static void parseFaceToken(const std::string &tok, int &vi, int &ti, int &ni)
+	{
+		vi = ti = ni = 0;
+		// v/vt/vn or v//vn or v/vt or v
+		size_t a = tok.find('/');
+		if (a == std::string::npos)
+		{
+			vi = std::stoi(tok);
+			return;
+		}
+		size_t b = tok.find('/', a + 1);
+		vi = std::stoi(tok.substr(0, a));
+		if (b == std::string::npos)
+		{
+			// v/vt
+			std::string s1 = tok.substr(a + 1);
+			if (!s1.empty())
+				ti = std::stoi(s1);
+			return;
+		}
+		// v/vt/vn OR v//vn
+		std::string s1 = tok.substr(a + 1, b - (a + 1));
+		std::string s2 = tok.substr(b + 1);
+		if (!s1.empty())
+			ti = std::stoi(s1);
+		if (!s2.empty())
+			ni = std::stoi(s2);
+	}
+
+	static std::string parseMtlMapKd(const std::string &mtlPath, const std::string &wantMtlName)
+	{
+		std::ifstream f(mtlPath);
+		if (!f)
+			return "";
 
 		std::string line;
-		positions.reserve(4096);
-		normals.reserve(4096);
-		out.vertices.reserve(4096);
-		out.indices.reserve(8192);
+		std::string current;
+		std::string firstMap;
 
 		while (std::getline(f, line))
 		{
+			line = trimLeft(line);
 			if (line.empty() || line[0] == '#')
 				continue;
 
-			std::istringstream iss(line);
-			std::string tag;
-			iss >> tag;
+			if (startsWith(line, "newmtl "))
+			{
+				current = trimLeft(line.substr(7));
+				continue;
+			}
+			if (startsWith(line, "map_Kd "))
+			{
+				std::string rest = trimLeft(line.substr(7)); // may include spaces
+				if (firstMap.empty())
+					firstMap = rest;
+				if (!wantMtlName.empty() && current == wantMtlName)
+					return rest;
+			}
+		}
 
-			if (tag == "v")
+		return firstMap;
+	}
+
+	MeshData loadObj(const std::string &objPath, bool triangulate)
+	{
+		std::ifstream f(objPath);
+		if (!f)
+			throw std::runtime_error("OBJ open failed: " + objPath);
+
+		const std::string objDir = dirOf(objPath);
+
+		std::vector<V3> positions;
+		std::vector<V3> normals;
+		std::vector<V2> uvs;
+
+		std::string mtllib;
+		std::string firstUseMtl;
+
+		std::unordered_map<std::string, uint32_t> cache;
+		MeshData out;
+
+		std::string line;
+		while (std::getline(f, line))
+		{
+			line = trimLeft(line);
+			if (line.empty() || line[0] == '#')
+				continue;
+
+			if (startsWith(line, "mtllib "))
 			{
-				Vec3 p{};
-				iss >> p.x >> p.y >> p.z;
-				positions.push_back(p);
+				if (mtllib.empty())
+					mtllib = trimLeft(line.substr(7));
+				continue;
 			}
-			else if (tag == "vn")
+			if (startsWith(line, "usemtl "))
 			{
-				Vec3 n{};
-				iss >> n.x >> n.y >> n.z;
-				normals.push_back(norm(n));
+				if (firstUseMtl.empty())
+					firstUseMtl = trimLeft(line.substr(7));
+				continue;
 			}
-			else if (tag == "f")
+			if (startsWith(line, "v "))
 			{
-				std::vector<std::string> toks;
-				std::string t;
-				while (iss >> t)
-					toks.push_back(t);
-				if (toks.size() < 3)
+				std::istringstream ss(line.substr(2));
+				V3 v{};
+				ss >> v.x >> v.y >> v.z;
+				positions.push_back(v);
+				continue;
+			}
+			if (startsWith(line, "vn "))
+			{
+				std::istringstream ss(line.substr(3));
+				V3 n{};
+				ss >> n.x >> n.y >> n.z;
+				normals.push_back(n);
+				continue;
+			}
+			if (startsWith(line, "vt "))
+			{
+				std::istringstream ss(line.substr(3));
+				V2 t{};
+				ss >> t.u >> t.v;
+				uvs.push_back(t);
+				continue;
+			}
+			if (startsWith(line, "f "))
+			{
+				std::istringstream ss(line.substr(2));
+				std::vector<std::string> face;
+				std::string tok;
+				while (ss >> tok)
+					face.push_back(tok);
+				if (face.size() < 3)
 					continue;
 
-				std::vector<Ref> refs;
-				refs.reserve(toks.size());
-				for (size_t i = 0; i < toks.size(); ++i)
+				auto emitVertex = [&](const std::string &ftok, const V3 &faceNrm, bool hasFaceNrm) -> uint32_t
 				{
-					refs.push_back(parseRef(
-						toks[i],
-						static_cast<int>(positions.size()),
-						0,
-						static_cast<int>(normals.size())));
-				}
+					int vi = 0, ti = 0, ni = 0;
+					parseFaceToken(ftok, vi, ti, ni);
 
-				Vec3 faceN{0.f, 0.f, 1.f};
-				bool anyVN = false;
-				for (const auto &r : refs)
-					if (r.vn >= 0)
+					const int p = fixIndex(vi, (int)positions.size());
+					const int t = (ti != 0) ? fixIndex(ti, (int)uvs.size()) : -1;
+					const int n = (ni != 0) ? fixIndex(ni, (int)normals.size()) : -1;
+
+					// If no vn in file/token -> don't cache across faces (flat normal)
+					if (n < 0)
 					{
-						anyVN = true;
-						break;
-					}
-				if (!anyVN)
-				{
-					const Vec3 p0 = positions[static_cast<size_t>(refs[0].v)];
-					const Vec3 p1 = positions[static_cast<size_t>(refs[1].v)];
-					const Vec3 p2 = positions[static_cast<size_t>(refs[2].v)];
-					faceN = norm(cross(sub(p1, p0), sub(p2, p0)));
-				}
-
-				auto emitIndex = [&](const Ref &r) -> uint32_t
-				{
-					const Vec3 p = positions[static_cast<size_t>(r.v)];
-					Vec3 n = faceN;
-					if (r.vn >= 0)
-						n = normals[static_cast<size_t>(r.vn)];
-
-					if (r.vn >= 0)
-					{
-						Key k{r.v, r.vt, r.vn};
-						auto it = dedup.find(k);
-						if (it != dedup.end())
-							return it->second;
-
 						scop::vk::Vertex v{};
-						v.pos[0] = p.x;
-						v.pos[1] = p.y;
-						v.pos[2] = p.z;
-						v.normal[0] = n.x;
-						v.normal[1] = n.y;
-						v.normal[2] = n.z;
+						const V3 P = positions.at((size_t)p);
+						v.pos[0] = P.x;
+						v.pos[1] = P.y;
+						v.pos[2] = P.z;
 
-						uint32_t newIndex = static_cast<uint32_t>(out.vertices.size());
+						const V3 N = hasFaceNrm ? faceNrm : V3{0.f, 1.f, 0.f};
+						v.nrm[0] = N.x;
+						v.nrm[1] = N.y;
+						v.nrm[2] = N.z;
+
+						if (t >= 0)
+						{
+							const V2 T = uvs.at((size_t)t);
+							v.uv[0] = T.u;
+							v.uv[1] = T.v;
+						}
+						else
+						{
+							v.uv[0] = 0.f;
+							v.uv[1] = 0.f;
+						}
+
 						out.vertices.push_back(v);
-						dedup.emplace(k, newIndex);
-						return newIndex;
+						return (uint32_t)(out.vertices.size() - 1);
+					}
+
+					// cache key for smooth data
+					std::string key = std::to_string(vi) + "/" + std::to_string(ti) + "/" + std::to_string(ni);
+					auto it = cache.find(key);
+					if (it != cache.end())
+						return it->second;
+
+					scop::vk::Vertex v{};
+					const V3 P = positions.at((size_t)p);
+					v.pos[0] = P.x;
+					v.pos[1] = P.y;
+					v.pos[2] = P.z;
+
+					const V3 N = normals.at((size_t)n);
+					v.nrm[0] = N.x;
+					v.nrm[1] = N.y;
+					v.nrm[2] = N.z;
+
+					if (t >= 0)
+					{
+						const V2 T = uvs.at((size_t)t);
+						v.uv[0] = T.u;
+						v.uv[1] = T.v;
 					}
 					else
 					{
-						scop::vk::Vertex v{};
-						v.pos[0] = p.x;
-						v.pos[1] = p.y;
-						v.pos[2] = p.z;
-						v.normal[0] = n.x;
-						v.normal[1] = n.y;
-						v.normal[2] = n.z;
-
-						uint32_t newIndex = static_cast<uint32_t>(out.vertices.size());
-						out.vertices.push_back(v);
-						return newIndex;
+						v.uv[0] = 0.f;
+						v.uv[1] = 0.f;
 					}
+
+					out.vertices.push_back(v);
+					const uint32_t idx = (uint32_t)(out.vertices.size() - 1);
+					cache[key] = idx;
+					return idx;
 				};
 
-				const uint32_t i0 = emitIndex(refs[0]);
-				for (size_t i = 1; i + 1 < refs.size(); ++i)
+				auto faceNormal = [&](const V3 &a, const V3 &b, const V3 &c) -> V3
 				{
-					uint32_t i1 = emitIndex(refs[i]);
-					uint32_t i2 = emitIndex(refs[i + 1]);
-					out.indices.push_back(i0);
-					out.indices.push_back(i1);
-					out.indices.push_back(i2);
+					const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+					const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+					V3 n{};
+					n.x = uy * vz - uz * vy;
+					n.y = uz * vx - ux * vz;
+					n.z = ux * vy - uy * vx;
+					const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+					if (len > 0.000001f)
+					{
+						n.x /= len;
+						n.y /= len;
+						n.z /= len;
+					}
+					return n;
+				};
+
+				auto getPosFromTok = [&](const std::string &ftok) -> V3
+				{
+					int vi = 0, ti = 0, ni = 0;
+					parseFaceToken(ftok, vi, ti, ni);
+					const int p = fixIndex(vi, (int)positions.size());
+					return positions.at((size_t)p);
+				};
+
+				if (triangulate && face.size() > 3)
+				{
+					// fan triangulation
+					for (size_t k = 1; k + 1 < face.size(); ++k)
+					{
+						const V3 A = getPosFromTok(face[0]);
+						const V3 B = getPosFromTok(face[k]);
+						const V3 C = getPosFromTok(face[k + 1]);
+						const V3 FN = faceNormal(A, B, C);
+
+						out.indices.push_back(emitVertex(face[0], FN, true));
+						out.indices.push_back(emitVertex(face[k], FN, true));
+						out.indices.push_back(emitVertex(face[k + 1], FN, true));
+					}
+				}
+				else
+				{
+					// assume triangle
+					const V3 A = getPosFromTok(face[0]);
+					const V3 B = getPosFromTok(face[1]);
+					const V3 C = getPosFromTok(face[2]);
+					const V3 FN = faceNormal(A, B, C);
+
+					out.indices.push_back(emitVertex(face[0], FN, true));
+					out.indices.push_back(emitVertex(face[1], FN, true));
+					out.indices.push_back(emitVertex(face[2], FN, true));
 				}
 			}
 		}
 
-		if (normalizeToUnit && !out.vertices.empty())
+		// MTL -> diffuse texture (map_Kd)
+		if (!mtllib.empty())
 		{
-			float minX = std::numeric_limits<float>::max();
-			float minY = std::numeric_limits<float>::max();
-			float minZ = std::numeric_limits<float>::max();
-			float maxX = -std::numeric_limits<float>::max();
-			float maxY = -std::numeric_limits<float>::max();
-			float maxZ = -std::numeric_limits<float>::max();
-
-			for (const auto &v : out.vertices)
+			const std::string mtlPath = objDir + mtllib;
+			const std::string mapKd = parseMtlMapKd(mtlPath, firstUseMtl);
+			if (!mapKd.empty())
 			{
-				minX = std::min(minX, v.pos[0]);
-				maxX = std::max(maxX, v.pos[0]);
-				minY = std::min(minY, v.pos[1]);
-				maxY = std::max(maxY, v.pos[1]);
-				minZ = std::min(minZ, v.pos[2]);
-				maxZ = std::max(maxZ, v.pos[2]);
-			}
-
-			const float cx = (minX + maxX) * 0.5f;
-			const float cy = (minY + maxY) * 0.5f;
-			const float cz = (minZ + maxZ) * 0.5f;
-
-			const float sx = (maxX - minX);
-			const float sy = (maxY - minY);
-			const float sz = (maxZ - minZ);
-			const float s = std::max(sx, std::max(sy, sz));
-			const float inv = (s > 0.f) ? (1.0f / s) : 1.0f;
-
-			for (auto &v : out.vertices)
-			{
-				v.pos[0] = (v.pos[0] - cx) * inv;
-				v.pos[1] = (v.pos[1] - cy) * inv;
-				v.pos[2] = (v.pos[2] - cz) * inv;
+				const std::string mtlDir = dirOf(mtlPath);
+				// mapKd can already be relative or absolute; simplest: treat as relative to MTL dir unless it looks absolute
+				if (!mapKd.empty() && (mapKd[0] == '/' || (mapKd.size() > 2 && std::isalpha((unsigned char)mapKd[0]) && mapKd[1] == ':')))
+					out.diffusePath = mapKd;
+				else
+					out.diffusePath = mtlDir + mapKd;
 			}
 		}
 
 		return out;
 	}
 
-}
+} // namespace scop::io
