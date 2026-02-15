@@ -29,13 +29,14 @@ namespace scop::vk
 			throw std::runtime_error("vkAllocateCommandBuffers failed");
 	}
 
-	void Commands::recordTriangle(
+	void Commands::recordIndexed(
 		VkRenderPass renderPass,
 		const std::vector<VkFramebuffer> &framebuffers,
 		VkExtent2D extent,
 		VkPipeline pipeline,
 		VkBuffer vertexBuffer,
-		uint32_t vertexCount)
+		VkBuffer indexBuffer,
+		uint32_t indexCount)
 	{
 		if (buffers_.size() != framebuffers.size())
 			throw std::runtime_error("Commands: buffers count != framebuffers count");
@@ -65,11 +66,13 @@ namespace scop::vk
 			vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-			VkBuffer bufs[] = {vertexBuffer};
+			VkBuffer vbufs[] = {vertexBuffer};
 			VkDeviceSize offs[] = {0};
-			vkCmdBindVertexBuffers(cmd, 0, 1, bufs, offs);
+			vkCmdBindVertexBuffers(cmd, 0, 1, vbufs, offs);
 
-			vkCmdDraw(cmd, vertexCount, 1, 0, 0);
+			vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+
 			vkCmdEndRenderPass(cmd);
 
 			if (vkEndCommandBuffer(cmd) != VK_SUCCESS)

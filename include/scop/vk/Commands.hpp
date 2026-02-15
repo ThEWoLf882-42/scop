@@ -1,5 +1,6 @@
 #pragma once
 
+#include <utility>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -40,13 +41,14 @@ namespace scop::vk
 		void create(VkDevice device, uint32_t graphicsQueueFamilyIndex, size_t bufferCount);
 		void reset() noexcept;
 
-		void recordTriangle(
+		void recordIndexed(
 			VkRenderPass renderPass,
 			const std::vector<VkFramebuffer> &framebuffers,
 			VkExtent2D extent,
 			VkPipeline pipeline,
 			VkBuffer vertexBuffer,
-			uint32_t vertexCount);
+			VkBuffer indexBuffer,
+			uint32_t indexCount);
 
 		const std::vector<VkCommandBuffer> &buffers() const { return buffers_; }
 

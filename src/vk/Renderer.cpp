@@ -1,9 +1,9 @@
 #include "scop/vk/Renderer.hpp"
+#include "scop/vk/Uploader.hpp"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <stdexcept>
 #include <vector>
 
 namespace
@@ -15,7 +15,9 @@ namespace
 		{{-0.6f, 0.6f}, {0.2f, 0.4f, 1.0f}},
 	};
 
-}
+	const std::vector<uint16_t> kIndices = {0, 1, 2};
+
+} // namespace
 
 namespace scop::vk
 {
@@ -35,16 +37,20 @@ namespace scop::vk
 
 		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), swap_.extent());
 
-		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), kTriangle);
+		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
+
+		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kTriangle);
+		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kIndices);
 
 		cmds_ = Commands(ctx_.device(),
 						 ctx_.indices().graphicsFamily.value(),
 						 fbs_.size());
 
-		cmds_.recordTriangle(pipe_.renderPass(), fbs_.get(), swap_.extent(),
-							 pipe_.pipeline(),
-							 vb_.buffer(),
-							 vb_.count());
+		cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
+							pipe_.pipeline(),
+							vb_.buffer(),
+							ib_.buffer(),
+							ib_.count());
 
 		presenter_ = FramePresenter(ctx_.device(),
 									ctx_.graphicsQueue(),
@@ -53,10 +59,7 @@ namespace scop::vk
 									cmds_);
 	}
 
-	void Renderer::pollEvents()
-	{
-		glfwPollEvents();
-	}
+	void Renderer::pollEvents() { glfwPollEvents(); }
 
 	bool Renderer::shouldClose() const
 	{
@@ -68,9 +71,6 @@ namespace scop::vk
 		glfwSetWindowShouldClose(ctx_.window(), GLFW_TRUE);
 	}
 
-	void Renderer::draw()
-	{
-		presenter_.draw();
-	}
+	void Renderer::draw() { presenter_.draw(); }
 
 }

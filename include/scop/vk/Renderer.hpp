@@ -42,6 +42,7 @@ namespace scop::vk
 		Pipeline pipe_{};
 		Framebuffers fbs_{};
 		VertexBuffer vb_{};
+		IndexBuffer ib_{};
 		Commands cmds_{};
 		FramePresenter presenter_{};
 	};

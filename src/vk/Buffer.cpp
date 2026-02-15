@@ -1,4 +1,5 @@
 #include "scop/vk/Buffer.hpp"
+#include "scop/vk/Uploader.hpp"
 
 #include <cstring>
 #include <stdexcept>
@@ -56,13 +57,24 @@ namespace scop::vk
 		return out;
 	}
 
+	static void destroyAllocated(VkDevice device, AllocatedBuffer &b)
+	{
+		if (b.buffer)
+			vkDestroyBuffer(device, b.buffer, nullptr);
+		if (b.memory)
+			vkFreeMemory(device, b.memory, nullptr);
+		b.buffer = VK_NULL_HANDLE;
+		b.memory = VK_NULL_HANDLE;
+	}
+
 	void VertexBuffer::create(VkDevice device, VkPhysicalDevice physicalDevice,
+							  Uploader &uploader,
 							  const std::vector<Vertex> &vertices)
 	{
 		reset();
 
 		if (vertices.empty())
-			throw std::runtime_error("VertexBuffer: vertices is empty");
+			throw std::runtime_error("VertexBuffer: vertices empty");
 
 		device_ = device;
 		physicalDevice_ = physicalDevice;
@@ -70,28 +82,75 @@ namespace scop::vk
 
 		const VkDeviceSize size = sizeof(vertices[0]) * vertices.size();
 
-		buf_ = createBuffer(
-			device_,
-			physicalDevice_,
-			size,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		// staging
+		AllocatedBuffer staging = createBuffer(
+			device_, physicalDevice_, size,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
 		void *data = nullptr;
-		vkMapMemory(device_, buf_.memory, 0, size, 0, &data);
+		vkMapMemory(device_, staging.memory, 0, size, 0, &data);
 		std::memcpy(data, vertices.data(), static_cast<size_t>(size));
-		vkUnmapMemory(device_, buf_.memory);
+		vkUnmapMemory(device_, staging.memory);
+
+		// device local
+		buf_ = createBuffer(
+			device_, physicalDevice_, size,
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+		uploader.copyBuffer(staging.buffer, buf_.buffer, size);
+		destroyAllocated(device_, staging);
 	}
 
 	void VertexBuffer::reset() noexcept
 	{
 		if (device_ != VK_NULL_HANDLE)
-		{
-			if (buf_.buffer)
-				vkDestroyBuffer(device_, buf_.buffer, nullptr);
-			if (buf_.memory)
-				vkFreeMemory(device_, buf_.memory, nullptr);
-		}
+			destroyAllocated(device_, buf_);
+		buf_ = AllocatedBuffer{};
+		count_ = 0;
+		device_ = VK_NULL_HANDLE;
+		physicalDevice_ = VK_NULL_HANDLE;
+	}
+
+	void IndexBuffer::create(VkDevice device, VkPhysicalDevice physicalDevice,
+							 Uploader &uploader,
+							 const std::vector<uint16_t> &indices)
+	{
+		reset();
+
+		if (indices.empty())
+			throw std::runtime_error("IndexBuffer: indices empty");
+
+		device_ = device;
+		physicalDevice_ = physicalDevice;
+		count_ = static_cast<uint32_t>(indices.size());
+
+		const VkDeviceSize size = sizeof(indices[0]) * indices.size();
+
+		AllocatedBuffer staging = createBuffer(
+			device_, physicalDevice_, size,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+		void *data = nullptr;
+		vkMapMemory(device_, staging.memory, 0, size, 0, &data);
+		std::memcpy(data, indices.data(), static_cast<size_t>(size));
+		vkUnmapMemory(device_, staging.memory);
+
+		buf_ = createBuffer(
+			device_, physicalDevice_, size,
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+		uploader.copyBuffer(staging.buffer, buf_.buffer, size);
+		destroyAllocated(device_, staging);
+	}
+
+	void IndexBuffer::reset() noexcept
+	{
+		if (device_ != VK_NULL_HANDLE)
+			destroyAllocated(device_, buf_);
 		buf_ = AllocatedBuffer{};
 		count_ = 0;
 		device_ = VK_NULL_HANDLE;
