@@ -25,6 +25,7 @@ namespace scop::vk
 	public:
 		Renderer() = default;
 		Renderer(int width, int height, const char *title);
+		~Renderer() noexcept;
 
 		Renderer(const Renderer &) = delete;
 		Renderer &operator=(const Renderer &) = delete;

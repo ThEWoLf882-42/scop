@@ -120,6 +120,13 @@ namespace scop::vk
 
 	Renderer::Renderer(int width, int height, const char *title) { init(width, height, title); }
 
+	Renderer::~Renderer() noexcept
+	{
+		// Ensure GPU finished before destroying semaphores/fences/command buffers/etc.
+		if (ctx_.device() != VK_NULL_HANDLE)
+			vkDeviceWaitIdle(ctx_.device());
+	}
+
 	bool Renderer::loadModelFromPath(const std::string &path)
 	{
 		scop::io::MeshData mesh;
@@ -245,6 +252,19 @@ namespace scop::vk
 
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		cursorLocked_ = true;
+
+		glfwSetWindowFocusCallback(ctx_.window(), [](GLFWwindow *win, int focused)
+								   {
+			auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win));
+			if (!self) return;
+		
+			if (focused == GLFW_FALSE) {
+				if (self->cursorLocked_) {
+					self->cursorLocked_ = false;
+					glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+					self->firstMouse_ = true;
+				}
+			} });
 
 		glfwSetCursorPosCallback(
 			ctx_.window(),
