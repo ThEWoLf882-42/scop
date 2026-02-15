@@ -1,5 +1,6 @@
 #include "scop/vk/Texture2D.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -136,11 +137,11 @@ namespace scop::vk
 
 	static VkFormat pickFormat(VkPhysicalDevice phys)
 	{
-		VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+		VkFormat fmt = VK_FORMAT_R8G8B8A8_SRGB;
 		VkFormatProperties fp{};
-		vkGetPhysicalDeviceFormatProperties(phys, format, &fp);
+		vkGetPhysicalDeviceFormatProperties(phys, fmt, &fp);
 		if (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
-			return format;
+			return fmt;
 		return VK_FORMAT_R8G8B8A8_UNORM;
 	}
 
@@ -212,14 +213,28 @@ namespace scop::vk
 		return s;
 	}
 
-	// ---- PPM (P6) loader ----
-	// Reads tokens while skipping comments.
+	// ---------- helpers ----------
+	static bool hasExtCI(const std::string &path, const char *ext)
+	{
+		const size_t lp = path.size();
+		const size_t le = std::strlen(ext);
+		if (lp < le)
+			return false;
+		for (size_t i = 0; i < le; ++i)
+		{
+			const char a = static_cast<char>(std::tolower(static_cast<unsigned char>(path[lp - le + i])));
+			const char b = static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
+			if (a != b)
+				return false;
+		}
+		return true;
+	}
+
+	// Reads tokens while skipping comments (# ... endline)
 	static std::string nextToken(std::istream &in)
 	{
 		std::string tok;
 		char c = 0;
-
-		// skip whitespace + comments
 		while (in.get(c))
 		{
 			if (std::isspace(static_cast<unsigned char>(c)))
@@ -230,12 +245,9 @@ namespace scop::vk
 				std::getline(in, dummy);
 				continue;
 			}
-			// start token
 			tok.push_back(c);
 			break;
 		}
-
-		// read rest of token
 		while (in.get(c))
 		{
 			if (std::isspace(static_cast<unsigned char>(c)))
@@ -245,6 +257,7 @@ namespace scop::vk
 		return tok;
 	}
 
+	// ---- PPM P6 -> RGBA ----
 	static void loadPPM_P6_RGBA(const std::string &path, int &w, int &h, std::vector<uint8_t> &rgbaOut, bool flipY)
 	{
 		std::ifstream f(path, std::ios::binary);
@@ -258,30 +271,24 @@ namespace scop::vk
 		const std::string sw = nextToken(f);
 		const std::string sh = nextToken(f);
 		const std::string sm = nextToken(f);
-
 		if (sw.empty() || sh.empty() || sm.empty())
 			throw std::runtime_error("PPM header parse failed: " + path);
 
 		w = std::stoi(sw);
 		h = std::stoi(sh);
 		const int maxv = std::stoi(sm);
-
 		if (w <= 0 || h <= 0)
 			throw std::runtime_error("PPM invalid size: " + path);
 		if (maxv <= 0 || maxv > 255)
-			throw std::runtime_error("PPM maxval unsupported (must be <=255): " + path);
+			throw std::runtime_error("PPM maxval unsupported: " + path);
 
-		// After maxval there is one whitespace; ensure we are positioned for binary.
-		// (nextToken already consumed one whitespace after token, but be safe)
+		// consume one whitespace if needed
 		char c = 0;
 		f.read(&c, 1);
 		if (!f)
 			throw std::runtime_error("PPM missing pixel data: " + path);
 		if (!std::isspace(static_cast<unsigned char>(c)))
-		{
-			// put back if it was actually pixel
 			f.seekg(-1, std::ios::cur);
-		}
 
 		const size_t rgbSize = static_cast<size_t>(w) * static_cast<size_t>(h) * 3;
 		std::vector<uint8_t> rgb(rgbSize);
@@ -293,9 +300,9 @@ namespace scop::vk
 
 		for (int y = 0; y < h; ++y)
 		{
-			const int yy = flipY ? (h - 1 - y) : y;
+			const int outY = flipY ? (h - 1 - y) : y;
 			const size_t srcRow = static_cast<size_t>(y) * static_cast<size_t>(w) * 3;
-			const size_t dstRow = static_cast<size_t>(yy) * static_cast<size_t>(w) * 4;
+			const size_t dstRow = static_cast<size_t>(outY) * static_cast<size_t>(w) * 4;
 			for (int x = 0; x < w; ++x)
 			{
 				const size_t si = srcRow + static_cast<size_t>(x) * 3;
@@ -308,8 +315,104 @@ namespace scop::vk
 		}
 	}
 
-	Texture2D::~Texture2D() noexcept { destroy(); }
+	// ---- BMP (BI_RGB) 24/32 -> RGBA ----
+	static uint16_t rd16(const uint8_t *p) { return (uint16_t)p[0] | (uint16_t)(p[1] << 8); }
+	static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)(p[1] << 8) | (uint32_t)(p[2] << 16) | (uint32_t)(p[3] << 24); }
+	static int32_t rds32(const uint8_t *p) { return (int32_t)rd32(p); }
 
+	static void loadBMP_RGBA(const std::string &path, int &w, int &h, std::vector<uint8_t> &rgbaOut, bool flipY)
+	{
+		std::ifstream f(path, std::ios::binary);
+		if (!f)
+			throw std::runtime_error("BMP open failed: " + path);
+
+		uint8_t fh[14]{};
+		f.read(reinterpret_cast<char *>(fh), 14);
+		if (f.gcount() != 14)
+			throw std::runtime_error("BMP header truncated: " + path);
+
+		if (fh[0] != 'B' || fh[1] != 'M')
+			throw std::runtime_error("Not a BMP: " + path);
+
+		const uint32_t offBits = rd32(&fh[10]);
+
+		uint8_t dibSizeBuf[4]{};
+		f.read(reinterpret_cast<char *>(dibSizeBuf), 4);
+		if (f.gcount() != 4)
+			throw std::runtime_error("BMP DIB header truncated: " + path);
+		const uint32_t dibSize = rd32(dibSizeBuf);
+		if (dibSize < 40)
+			throw std::runtime_error("BMP DIB unsupported: " + path);
+
+		std::vector<uint8_t> dib(dibSize);
+		std::memcpy(dib.data(), dibSizeBuf, 4);
+		f.read(reinterpret_cast<char *>(dib.data() + 4), (std::streamsize)(dibSize - 4));
+		if (f.gcount() != (std::streamsize)(dibSize - 4))
+			throw std::runtime_error("BMP DIB truncated: " + path);
+
+		const int32_t width = rds32(&dib[4]);
+		const int32_t height = rds32(&dib[8]);
+		const uint16_t planes = rd16(&dib[12]);
+		const uint16_t bpp = rd16(&dib[14]);
+		const uint32_t comp = rd32(&dib[16]);
+
+		if (planes != 1)
+			throw std::runtime_error("BMP planes != 1: " + path);
+		if (comp != 0)
+			throw std::runtime_error("BMP compression unsupported (need BI_RGB): " + path);
+		if (bpp != 24 && bpp != 32)
+			throw std::runtime_error("BMP bpp unsupported (need 24 or 32): " + path);
+		if (width <= 0 || height == 0)
+			throw std::runtime_error("BMP invalid size: " + path);
+
+		const bool bottomUp = (height > 0);
+		w = width;
+		h = bottomUp ? height : -height;
+
+		const size_t bytesPerPixel = (bpp == 24) ? 3u : 4u;
+		const size_t rowStrideFile = (bpp == 24)
+										 ? ((static_cast<size_t>(w) * 3u + 3u) & ~3u)
+										 : (static_cast<size_t>(w) * 4u);
+
+		rgbaOut.assign(static_cast<size_t>(w) * static_cast<size_t>(h) * 4, 255);
+
+		f.seekg((std::streamoff)offBits, std::ios::beg);
+		if (!f)
+			throw std::runtime_error("BMP seek failed: " + path);
+
+		std::vector<uint8_t> row(rowStrideFile);
+
+		for (int yFile = 0; yFile < h; ++yFile)
+		{
+			f.read(reinterpret_cast<char *>(row.data()), (std::streamsize)rowStrideFile);
+			if (f.gcount() != (std::streamsize)rowStrideFile)
+				throw std::runtime_error("BMP pixel data truncated: " + path);
+
+			// Convert file row index to a "top-down" row index
+			const int topDownY = bottomUp ? (h - 1 - yFile) : yFile;
+			// Apply the same convention as our PPM loader: output y=0 is bottom row
+			const int outY = flipY ? (h - 1 - topDownY) : topDownY;
+
+			const size_t dstRow = static_cast<size_t>(outY) * static_cast<size_t>(w) * 4;
+			for (int x = 0; x < w; ++x)
+			{
+				const size_t si = static_cast<size_t>(x) * bytesPerPixel;
+				const size_t di = dstRow + static_cast<size_t>(x) * 4;
+
+				const uint8_t B = row[si + 0];
+				const uint8_t G = row[si + 1];
+				const uint8_t R = row[si + 2];
+				const uint8_t A = (bpp == 32) ? row[si + 3] : 255;
+
+				rgbaOut[di + 0] = R;
+				rgbaOut[di + 1] = G;
+				rgbaOut[di + 2] = B;
+				rgbaOut[di + 3] = A;
+			}
+		}
+	}
+
+	Texture2D::~Texture2D() noexcept { destroy(); }
 	Texture2D::Texture2D(Texture2D &&o) noexcept { *this = std::move(o); }
 	Texture2D &Texture2D::operator=(Texture2D &&o) noexcept
 	{
@@ -394,14 +497,28 @@ namespace scop::vk
 
 	void Texture2D::load(VkDevice device, VkPhysicalDevice phys, uint32_t qf, VkQueue q, const std::string &path)
 	{
-		// Subject-safe: support PPM P6 only
 		destroy();
 		device_ = device;
 		format_ = pickFormat(phys);
 
 		int w = 0, h = 0;
 		std::vector<uint8_t> rgba;
-		loadPPM_P6_RGBA(path, w, h, rgba, true); // flipY=true to match common UV expectations
+
+		// Subject-safe formats:
+		// - PPM P6 (binary)
+		// - BMP 24/32-bit (BI_RGB)
+		if (hasExtCI(path, ".ppm"))
+		{
+			loadPPM_P6_RGBA(path, w, h, rgba, true);
+		}
+		else if (hasExtCI(path, ".bmp"))
+		{
+			loadBMP_RGBA(path, w, h, rgba, true);
+		}
+		else
+		{
+			throw std::runtime_error("Texture format not supported (use .bmp or .ppm): " + path);
+		}
 
 		const VkDeviceSize size = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * 4;
 

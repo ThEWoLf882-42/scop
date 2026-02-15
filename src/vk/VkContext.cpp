@@ -186,6 +186,7 @@ namespace scop::vk
 
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+		glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
 
 		window_ = glfwCreateWindow(width, height, title, nullptr, nullptr);
 		if (!window_)
