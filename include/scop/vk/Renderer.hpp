@@ -50,13 +50,11 @@ namespace scop::vk
 		std::vector<UniformBuffer> ubos_;
 		Descriptors desc_{};
 
-		// pipelines
 		Pipeline modelPipe_{};
 		PipelineVariant linesPipe_{};
 
 		Framebuffers fbs_{};
 
-		// geometry
 		VertexBuffer vb_{};
 		IndexBuffer ib_{};
 
@@ -88,6 +86,22 @@ namespace scop::vk
 		bool wireframe_ = false;
 		bool warnedNoWire_ = false;
 
+		// auto-fit + scale controls
+		bool autoFit_ = true;
+		bool fWasDown_ = false;
+		bool plusWasDown_ = false;
+		bool minusWasDown_ = false;
+		bool cWasDown_ = false;
+		bool tWasDown_ = false;
+
+		float fitOffsetX_ = 0.0f;
+		float fitOffsetY_ = 0.0f;
+		float fitOffsetZ_ = 0.0f;
+		float fitScale_ = 1.0f;	 // computed from AABB
+		float userScale_ = 1.0f; // user multiplier
+
+		bool autoRotate_ = true;
+
 		bool paused_ = false;
 		float modelTime_ = 0.0f;
 
@@ -99,4 +113,4 @@ namespace scop::vk
 		bool framebufferResized_ = false;
 	};
 
-}
+} // namespace scop::vk
