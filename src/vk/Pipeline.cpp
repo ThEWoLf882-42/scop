@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -42,6 +43,9 @@ namespace scop::vk
 	void Pipeline::create(VkDevice device, VkFormat swapchainFormat, VkExtent2D extent,
 						  const char *vertSpvPath, const char *fragSpvPath)
 	{
+		reset();
+		device_ = device;
+
 		// Render pass
 		VkAttachmentDescription color{};
 		color.format = swapchainFormat;
@@ -78,15 +82,15 @@ namespace scop::vk
 		rp.dependencyCount = 1;
 		rp.pDependencies = &dep;
 
-		if (vkCreateRenderPass(device, &rp, nullptr, &renderPass_) != VK_SUCCESS)
+		if (vkCreateRenderPass(device_, &rp, nullptr, &renderPass_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreateRenderPass failed");
 
 		// Shaders
 		auto vertCode = readFile(vertSpvPath);
 		auto fragCode = readFile(fragSpvPath);
 
-		VkShaderModule vert = createShaderModule(device, vertCode);
-		VkShaderModule frag = createShaderModule(device, fragCode);
+		VkShaderModule vert = createShaderModule(device_, vertCode);
+		VkShaderModule frag = createShaderModule(device_, fragCode);
 
 		VkPipelineShaderStageCreateInfo vertStage{};
 		vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -145,8 +149,9 @@ namespace scop::vk
 		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
 		VkPipelineColorBlendAttachmentState cba{};
-		cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-							 VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		cba.colorWriteMask =
+			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
 		VkPipelineColorBlendStateCreateInfo cb{};
 		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -156,7 +161,7 @@ namespace scop::vk
 		VkPipelineLayoutCreateInfo pl{};
 		pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 
-		if (vkCreatePipelineLayout(device, &pl, nullptr, &layout_) != VK_SUCCESS)
+		if (vkCreatePipelineLayout(device_, &pl, nullptr, &layout_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreatePipelineLayout failed");
 
 		VkGraphicsPipelineCreateInfo gp{};
@@ -173,25 +178,28 @@ namespace scop::vk
 		gp.renderPass = renderPass_;
 		gp.subpass = 0;
 
-		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gp, nullptr, &pipeline_) != VK_SUCCESS)
+		if (vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &gp, nullptr, &pipeline_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreateGraphicsPipelines failed");
 
-		vkDestroyShaderModule(device, frag, nullptr);
-		vkDestroyShaderModule(device, vert, nullptr);
+		vkDestroyShaderModule(device_, frag, nullptr);
+		vkDestroyShaderModule(device_, vert, nullptr);
 	}
 
-	void Pipeline::destroy(VkDevice device)
+	void Pipeline::reset() noexcept
 	{
-		if (pipeline_)
-			vkDestroyPipeline(device, pipeline_, nullptr);
-		if (layout_)
-			vkDestroyPipelineLayout(device, layout_, nullptr);
-		if (renderPass_)
-			vkDestroyRenderPass(device, renderPass_, nullptr);
-
+		if (device_ != VK_NULL_HANDLE)
+		{
+			if (pipeline_)
+				vkDestroyPipeline(device_, pipeline_, nullptr);
+			if (layout_)
+				vkDestroyPipelineLayout(device_, layout_, nullptr);
+			if (renderPass_)
+				vkDestroyRenderPass(device_, renderPass_, nullptr);
+		}
 		pipeline_ = VK_NULL_HANDLE;
 		layout_ = VK_NULL_HANDLE;
 		renderPass_ = VK_NULL_HANDLE;
+		device_ = VK_NULL_HANDLE;
 	}
 
 } // namespace scop::vk

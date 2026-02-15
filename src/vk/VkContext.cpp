@@ -25,7 +25,7 @@ namespace
 	const std::vector<const char *> kRequiredDeviceExtensions = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-	// Avoid macro issues: use strings
+	// Avoid macro issues: use strings for mac portability
 	constexpr const char *kPortabilitySubsetExtName = "VK_KHR_portability_subset";
 	constexpr const char *kPhysDevProps2ExtName = "VK_KHR_get_physical_device_properties2";
 
@@ -172,10 +172,19 @@ namespace
 namespace scop::vk
 {
 
-	void VkContext::initWindow(int width, int height, const char *title)
+	void VkContext::init(int width, int height, const char *title)
+	{
+		initWindow_(width, height, title);
+		initInstanceAndSurface_();
+		pickPhysicalDevice_();
+		createLogicalDevice_();
+	}
+
+	void VkContext::initWindow_(int width, int height, const char *title)
 	{
 		if (!glfwInit())
 			throw std::runtime_error("glfwInit failed");
+		glfwInited_ = true;
 
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -185,7 +194,7 @@ namespace scop::vk
 			throw std::runtime_error("glfwCreateWindow failed");
 	}
 
-	void VkContext::initInstanceAndSurface()
+	void VkContext::initInstanceAndSurface_()
 	{
 		const bool enableValidation = kEnableValidation && hasLayer(kValidationLayers[0]);
 
@@ -270,7 +279,7 @@ namespace scop::vk
 		return !sc.formats.empty() && !sc.presentModes.empty();
 	}
 
-	void VkContext::pickPhysicalDevice()
+	void VkContext::pickPhysicalDevice_()
 	{
 		uint32_t count = 0;
 		vkEnumeratePhysicalDevices(instance_, &count, nullptr);
@@ -301,7 +310,7 @@ namespace scop::vk
 				  << " present=" << indices_.presentFamily.value() << "\n";
 	}
 
-	void VkContext::createLogicalDevice()
+	void VkContext::createLogicalDevice_()
 	{
 		std::vector<uint32_t> uniqueFamilies;
 		uniqueFamilies.push_back(indices_.graphicsFamily.value());
@@ -352,28 +361,43 @@ namespace scop::vk
 		std::cout << "Logical device + queues created.\n";
 	}
 
-	void VkContext::destroy()
+	void VkContext::destroy() noexcept
 	{
 		if (device_ != VK_NULL_HANDLE)
+		{
 			vkDeviceWaitIdle(device_);
-
-		if (device_ != VK_NULL_HANDLE)
 			vkDestroyDevice(device_, nullptr);
-		device_ = VK_NULL_HANDLE;
+			device_ = VK_NULL_HANDLE;
+		}
 
 		if (surface_ != VK_NULL_HANDLE)
+		{
 			vkDestroySurfaceKHR(instance_, surface_, nullptr);
-		surface_ = VK_NULL_HANDLE;
+			surface_ = VK_NULL_HANDLE;
+		}
 
 		if (instance_ != VK_NULL_HANDLE)
+		{
 			vkDestroyInstance(instance_, nullptr);
-		instance_ = VK_NULL_HANDLE;
+			instance_ = VK_NULL_HANDLE;
+		}
 
 		if (window_)
+		{
 			glfwDestroyWindow(window_);
-		window_ = nullptr;
+			window_ = nullptr;
+		}
 
-		glfwTerminate();
+		if (glfwInited_)
+		{
+			glfwTerminate();
+			glfwInited_ = false;
+		}
+
+		physicalDevice_ = VK_NULL_HANDLE;
+		graphicsQueue_ = VK_NULL_HANDLE;
+		presentQueue_ = VK_NULL_HANDLE;
+		indices_ = QueueFamilyIndices{};
 	}
 
 } // namespace scop::vk

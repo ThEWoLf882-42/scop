@@ -1,12 +1,12 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <scop/vk/Swapchain.hpp>
+#include "scop/vk/Swapchain.hpp"
 
 #include <algorithm>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
-#include <iostream>
 
 namespace
 {
@@ -88,8 +88,11 @@ namespace scop::vk
 
 	void Swapchain::create(VkContext &ctx)
 	{
-		const auto sc = querySwapChainSupport(ctx.physicalDevice(), ctx.surface());
+		reset();
 
+		device_ = ctx.device();
+
+		const auto sc = querySwapChainSupport(ctx.physicalDevice(), ctx.surface());
 		if (sc.formats.empty() || sc.presentModes.empty())
 			throw std::runtime_error("Swapchain support incomplete");
 
@@ -141,7 +144,6 @@ namespace scop::vk
 		imageFormat_ = surfaceFormat.format;
 		extent_ = extent;
 
-		// image views
 		imageViews_.resize(images_.size());
 		for (size_t i = 0; i < images_.size(); ++i)
 		{
@@ -164,17 +166,26 @@ namespace scop::vk
 				  << " images=" << images_.size() << "\n";
 	}
 
-	void Swapchain::destroy(VkDevice device)
+	void Swapchain::reset() noexcept
 	{
-		for (auto v : imageViews_)
-			if (v)
-				vkDestroyImageView(device, v, nullptr);
-		imageViews_.clear();
-		images_.clear();
+		if (device_ != VK_NULL_HANDLE)
+		{
+			for (auto v : imageViews_)
+			{
+				if (v)
+					vkDestroyImageView(device_, v, nullptr);
+			}
+			imageViews_.clear();
+			images_.clear();
 
-		if (swapchain_)
-			vkDestroySwapchainKHR(device, swapchain_, nullptr);
+			if (swapchain_)
+				vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+		}
+
 		swapchain_ = VK_NULL_HANDLE;
+		device_ = VK_NULL_HANDLE;
+		imageFormat_ = VkFormat{};
+		extent_ = VkExtent2D{};
 	}
 
 } // namespace scop::vk

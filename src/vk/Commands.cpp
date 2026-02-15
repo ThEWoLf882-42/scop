@@ -4,63 +4,32 @@
 namespace scop::vk
 {
 
-	VkCommandPool createCommandPool(VkDevice device, uint32_t graphicsQueueFamilyIndex)
+	void Commands::create(VkDevice device, uint32_t graphicsQueueFamilyIndex, size_t bufferCount)
 	{
-		VkCommandPool pool = VK_NULL_HANDLE;
+		reset();
+		device_ = device;
 
-		VkCommandPoolCreateInfo ci{};
-		ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		ci.queueFamilyIndex = graphicsQueueFamilyIndex;
+		VkCommandPoolCreateInfo pci{};
+		pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		pci.queueFamilyIndex = graphicsQueueFamilyIndex;
 
-		if (vkCreateCommandPool(device, &ci, nullptr, &pool) != VK_SUCCESS)
+		if (vkCreateCommandPool(device_, &pci, nullptr, &pool_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreateCommandPool failed");
 
-		return pool;
-	}
-
-	void destroyCommandPool(VkDevice device, VkCommandPool &pool)
-	{
-		if (pool)
-			vkDestroyCommandPool(device, pool, nullptr);
-		pool = VK_NULL_HANDLE;
-	}
-
-	std::vector<VkCommandBuffer> allocateCommandBuffers(
-		VkDevice device,
-		VkCommandPool pool,
-		size_t count)
-	{
-		std::vector<VkCommandBuffer> out(count);
+		buffers_.resize(bufferCount);
 
 		VkCommandBufferAllocateInfo ai{};
 		ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		ai.commandPool = pool;
+		ai.commandPool = pool_;
 		ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		ai.commandBufferCount = static_cast<uint32_t>(count);
+		ai.commandBufferCount = static_cast<uint32_t>(buffers_.size());
 
-		if (vkAllocateCommandBuffers(device, &ai, out.data()) != VK_SUCCESS)
+		if (vkAllocateCommandBuffers(device_, &ai, buffers_.data()) != VK_SUCCESS)
 			throw std::runtime_error("vkAllocateCommandBuffers failed");
-
-		return out;
 	}
 
-	void freeCommandBuffers(
-		VkDevice device,
-		VkCommandPool pool,
-		std::vector<VkCommandBuffer> &buffers)
-	{
-		if (!buffers.empty())
-		{
-			vkFreeCommandBuffers(device, pool,
-								 static_cast<uint32_t>(buffers.size()),
-								 buffers.data());
-			buffers.clear();
-		}
-	}
-
-	void recordTriangleCommandBuffers(
-		const std::vector<VkCommandBuffer> &commandBuffers,
+	void Commands::recordTriangle(
 		VkRenderPass renderPass,
 		const std::vector<VkFramebuffer> &framebuffers,
 		VkExtent2D extent,
@@ -68,12 +37,12 @@ namespace scop::vk
 		VkBuffer vertexBuffer,
 		uint32_t vertexCount)
 	{
-		if (commandBuffers.size() != framebuffers.size())
-			throw std::runtime_error("Command buffers count != framebuffers count");
+		if (buffers_.size() != framebuffers.size())
+			throw std::runtime_error("Commands: buffers count != framebuffers count");
 
-		for (size_t i = 0; i < commandBuffers.size(); ++i)
+		for (size_t i = 0; i < buffers_.size(); ++i)
 		{
-			VkCommandBuffer cmd = commandBuffers[i];
+			VkCommandBuffer cmd = buffers_[i];
 
 			VkCommandBufferBeginInfo bi{};
 			bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -96,9 +65,9 @@ namespace scop::vk
 			vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-			VkBuffer buffers[] = {vertexBuffer};
-			VkDeviceSize offsets[] = {0};
-			vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
+			VkBuffer bufs[] = {vertexBuffer};
+			VkDeviceSize offs[] = {0};
+			vkCmdBindVertexBuffers(cmd, 0, 1, bufs, offs);
 
 			vkCmdDraw(cmd, vertexCount, 1, 0, 0);
 			vkCmdEndRenderPass(cmd);
@@ -106,6 +75,26 @@ namespace scop::vk
 			if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
 				throw std::runtime_error("vkEndCommandBuffer failed");
 		}
+	}
+
+	void Commands::reset() noexcept
+	{
+		if (device_ != VK_NULL_HANDLE)
+		{
+			if (!buffers_.empty() && pool_ != VK_NULL_HANDLE)
+			{
+				vkFreeCommandBuffers(device_, pool_,
+									 static_cast<uint32_t>(buffers_.size()),
+									 buffers_.data());
+			}
+			buffers_.clear();
+
+			if (pool_)
+				vkDestroyCommandPool(device_, pool_, nullptr);
+		}
+
+		pool_ = VK_NULL_HANDLE;
+		device_ = VK_NULL_HANDLE;
 	}
 
 } // namespace scop::vk

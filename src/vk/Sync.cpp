@@ -4,9 +4,10 @@
 namespace scop::vk
 {
 
-	SyncObjects createSyncObjects(VkDevice device)
+	void FrameSync::create(VkDevice device)
 	{
-		SyncObjects s{};
+		reset();
+		device_ = device;
 
 		VkSemaphoreCreateInfo si{};
 		si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -15,28 +16,30 @@ namespace scop::vk
 		fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-		if (vkCreateSemaphore(device, &si, nullptr, &s.imageAvailable) != VK_SUCCESS ||
-			vkCreateSemaphore(device, &si, nullptr, &s.renderFinished) != VK_SUCCESS ||
-			vkCreateFence(device, &fi, nullptr, &s.inFlight) != VK_SUCCESS)
+		if (vkCreateSemaphore(device_, &si, nullptr, &imageAvailable_) != VK_SUCCESS ||
+			vkCreateSemaphore(device_, &si, nullptr, &renderFinished_) != VK_SUCCESS ||
+			vkCreateFence(device_, &fi, nullptr, &inFlight_) != VK_SUCCESS)
 		{
-			throw std::runtime_error("createSyncObjects failed");
+			throw std::runtime_error("FrameSync::create failed");
 		}
-
-		return s;
 	}
 
-	void destroySyncObjects(VkDevice device, SyncObjects &s)
+	void FrameSync::reset() noexcept
 	{
-		if (s.inFlight)
-			vkDestroyFence(device, s.inFlight, nullptr);
-		if (s.renderFinished)
-			vkDestroySemaphore(device, s.renderFinished, nullptr);
-		if (s.imageAvailable)
-			vkDestroySemaphore(device, s.imageAvailable, nullptr);
+		if (device_ != VK_NULL_HANDLE)
+		{
+			if (inFlight_)
+				vkDestroyFence(device_, inFlight_, nullptr);
+			if (renderFinished_)
+				vkDestroySemaphore(device_, renderFinished_, nullptr);
+			if (imageAvailable_)
+				vkDestroySemaphore(device_, imageAvailable_, nullptr);
+		}
 
-		s.inFlight = VK_NULL_HANDLE;
-		s.renderFinished = VK_NULL_HANDLE;
-		s.imageAvailable = VK_NULL_HANDLE;
+		inFlight_ = VK_NULL_HANDLE;
+		renderFinished_ = VK_NULL_HANDLE;
+		imageAvailable_ = VK_NULL_HANDLE;
+		device_ = VK_NULL_HANDLE;
 	}
 
 } // namespace scop::vk

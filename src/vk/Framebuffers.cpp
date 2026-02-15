@@ -4,14 +4,14 @@
 namespace scop::vk
 {
 
-	std::vector<VkFramebuffer> createFramebuffers(
-		VkDevice device,
-		VkRenderPass renderPass,
-		const std::vector<VkImageView> &imageViews,
-		VkExtent2D extent)
+	void Framebuffers::create(VkDevice device, VkRenderPass renderPass,
+							  const std::vector<VkImageView> &imageViews,
+							  VkExtent2D extent)
 	{
-		std::vector<VkFramebuffer> out;
-		out.resize(imageViews.size());
+		reset();
+		device_ = device;
+
+		fbs_.resize(imageViews.size());
 
 		for (size_t i = 0; i < imageViews.size(); ++i)
 		{
@@ -26,21 +26,23 @@ namespace scop::vk
 			ci.height = extent.height;
 			ci.layers = 1;
 
-			if (vkCreateFramebuffer(device, &ci, nullptr, &out[i]) != VK_SUCCESS)
+			if (vkCreateFramebuffer(device_, &ci, nullptr, &fbs_[i]) != VK_SUCCESS)
 				throw std::runtime_error("vkCreateFramebuffer failed");
 		}
-
-		return out;
 	}
 
-	void destroyFramebuffers(VkDevice device, std::vector<VkFramebuffer> &framebuffers)
+	void Framebuffers::reset() noexcept
 	{
-		for (auto fb : framebuffers)
+		if (device_ != VK_NULL_HANDLE)
 		{
-			if (fb)
-				vkDestroyFramebuffer(device, fb, nullptr);
+			for (auto fb : fbs_)
+			{
+				if (fb)
+					vkDestroyFramebuffer(device_, fb, nullptr);
+			}
 		}
-		framebuffers.clear();
+		fbs_.clear();
+		device_ = VK_NULL_HANDLE;
 	}
 
 } // namespace scop::vk

@@ -6,9 +6,9 @@
 namespace scop::vk
 {
 
-	uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
-							uint32_t typeFilter,
-							VkMemoryPropertyFlags properties)
+	static uint32_t findMemoryType(VkPhysicalDevice physicalDevice,
+								   uint32_t typeFilter,
+								   VkMemoryPropertyFlags properties)
 	{
 		VkPhysicalDeviceMemoryProperties memProps{};
 		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
@@ -24,11 +24,11 @@ namespace scop::vk
 		throw std::runtime_error("findMemoryType failed");
 	}
 
-	AllocatedBuffer createBuffer(VkDevice device,
-								 VkPhysicalDevice physicalDevice,
-								 VkDeviceSize size,
-								 VkBufferUsageFlags usage,
-								 VkMemoryPropertyFlags properties)
+	static AllocatedBuffer createBuffer(VkDevice device,
+										VkPhysicalDevice physicalDevice,
+										VkDeviceSize size,
+										VkBufferUsageFlags usage,
+										VkMemoryPropertyFlags properties)
 	{
 		AllocatedBuffer out{};
 
@@ -56,35 +56,46 @@ namespace scop::vk
 		return out;
 	}
 
-	AllocatedBuffer createVertexBuffer(VkDevice device,
-									   VkPhysicalDevice physicalDevice,
-									   const std::vector<Vertex> &vertices)
+	void VertexBuffer::create(VkDevice device, VkPhysicalDevice physicalDevice,
+							  const std::vector<Vertex> &vertices)
 	{
+		reset();
+
+		if (vertices.empty())
+			throw std::runtime_error("VertexBuffer: vertices is empty");
+
+		device_ = device;
+		physicalDevice_ = physicalDevice;
+		count_ = static_cast<uint32_t>(vertices.size());
+
 		const VkDeviceSize size = sizeof(vertices[0]) * vertices.size();
 
-		AllocatedBuffer vb = createBuffer(
-			device,
-			physicalDevice,
+		buf_ = createBuffer(
+			device_,
+			physicalDevice_,
 			size,
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
 		void *data = nullptr;
-		vkMapMemory(device, vb.memory, 0, size, 0, &data);
+		vkMapMemory(device_, buf_.memory, 0, size, 0, &data);
 		std::memcpy(data, vertices.data(), static_cast<size_t>(size));
-		vkUnmapMemory(device, vb.memory);
-
-		return vb;
+		vkUnmapMemory(device_, buf_.memory);
 	}
 
-	void destroyBuffer(VkDevice device, AllocatedBuffer &buf)
+	void VertexBuffer::reset() noexcept
 	{
-		if (buf.buffer)
-			vkDestroyBuffer(device, buf.buffer, nullptr);
-		if (buf.memory)
-			vkFreeMemory(device, buf.memory, nullptr);
-		buf.buffer = VK_NULL_HANDLE;
-		buf.memory = VK_NULL_HANDLE;
+		if (device_ != VK_NULL_HANDLE)
+		{
+			if (buf_.buffer)
+				vkDestroyBuffer(device_, buf_.buffer, nullptr);
+			if (buf_.memory)
+				vkFreeMemory(device_, buf_.memory, nullptr);
+		}
+		buf_ = AllocatedBuffer{};
+		count_ = 0;
+		device_ = VK_NULL_HANDLE;
+		physicalDevice_ = VK_NULL_HANDLE;
 	}
 
 } // namespace scop::vk
