@@ -1,0 +1,14 @@
+# Build
+build/
+*.o
+*.a
+*.dylib
+*.spv
+
+# OS / editor
+.DS_Store
+.vscode/.browse.VC.db
+.vscode/ipch/
+
+# Misc
+*.log
