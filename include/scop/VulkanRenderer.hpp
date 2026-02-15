@@ -1,12 +1,11 @@
 #pragma once
+#include <string>
 
 namespace scop
 {
-
 	class VulkanRenderer
 	{
 	public:
-		void run();
+		void run(const std::string &initialObjPath = "");
 	};
-
 }

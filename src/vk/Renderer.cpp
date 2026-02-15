@@ -118,11 +118,18 @@ namespace
 namespace scop::vk
 {
 
-	Renderer::Renderer(int width, int height, const char *title) { init(width, height, title); }
+	Renderer::Renderer(int width, int height, const char *title)
+	{
+		init(width, height, title, std::string());
+	}
+
+	Renderer::Renderer(int width, int height, const char *title, const std::string &initialObjPath)
+	{
+		init(width, height, title, initialObjPath);
+	}
 
 	Renderer::~Renderer() noexcept
 	{
-		// Ensure GPU finished before destroying semaphores/fences/command buffers/etc.
 		if (ctx_.device() != VK_NULL_HANDLE)
 			vkDeviceWaitIdle(ctx_.device());
 	}
@@ -137,7 +144,7 @@ namespace scop::vk
 		catch (const std::exception &e)
 		{
 			std::cerr << "OBJ load failed: " << e.what() << "\n";
-			std::cerr << "No fallback mesh. Drop a valid .obj.\n";
+			std::cerr << "No fallback mesh. Provide a valid .obj.\n";
 			hasModel_ = false;
 			modelLabel_ = "Drop .obj onto window";
 			return false;
@@ -226,6 +233,11 @@ namespace scop::vk
 
 	void Renderer::init(int width, int height, const char *title)
 	{
+		init(width, height, title, std::string());
+	}
+
+	void Renderer::init(int width, int height, const char *title, const std::string &initialObjPath)
+	{
 		ctx_.init(width, height, title);
 
 		glfwSetWindowUserPointer(ctx_.window(), this);
@@ -253,18 +265,19 @@ namespace scop::vk
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		cursorLocked_ = true;
 
+		// Auto-unlock when losing focus (helps drag from Finder)
 		glfwSetWindowFocusCallback(ctx_.window(), [](GLFWwindow *win, int focused)
 								   {
-			auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win));
-			if (!self) return;
-		
-			if (focused == GLFW_FALSE) {
-				if (self->cursorLocked_) {
-					self->cursorLocked_ = false;
-					glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-					self->firstMouse_ = true;
-				}
-			} });
+        auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win));
+        if (!self) return;
+
+        if (focused == GLFW_FALSE) {
+            if (self->cursorLocked_) {
+                self->cursorLocked_ = false;
+                glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                self->firstMouse_ = true;
+            }
+        } });
 
 		glfwSetCursorPosCallback(
 			ctx_.window(),
@@ -329,7 +342,7 @@ namespace scop::vk
 				std::cerr << "Use [ and ] to cycle.\n";
 			});
 
-		// Grid/Axes only at startup
+		// Grid/Axes (always)
 		const auto lines = makeGridAxes(10, 1.0f);
 		linesVertexCount_ = static_cast<uint32_t>(lines.size());
 		{
@@ -337,8 +350,24 @@ namespace scop::vk
 			linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
 		}
 
+		// No model by default
 		hasModel_ = false;
 		modelLabel_ = "Drop .obj onto window";
+
+		// If user provided an initial OBJ, load it now (no cube fallback)
+		if (!initialObjPath.empty())
+		{
+			if (endsWithObj(initialObjPath) && loadModelFromPath(initialObjPath))
+			{
+				droppedObjs_.clear();
+				droppedObjs_.push_back(initialObjPath);
+				droppedIndex_ = 0;
+			}
+			else
+			{
+				std::cerr << "Initial path is not a valid .obj: " << initialObjPath << "\n";
+			}
+		}
 
 		recreateSwapchain();
 
@@ -478,7 +507,7 @@ namespace scop::vk
 		}
 		escWasDown_ = escDown;
 
-		// R resets camera
+		// R resets camera (also fixes -Wunused-private-field for rWasDown_)
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
 		{
@@ -530,7 +559,10 @@ namespace scop::vk
 		plusWasDown_ = plusDown;
 		minusWasDown_ = minusDown;
 
-		// F1 wireframe only makes sense if model exists (we still allow toggling, but it’s harmless)
+		if (!paused_ && autoRotate_)
+			modelTime_ += dt;
+
+		// F1 wireframe toggle (rebuild model pipeline + re-record command buffers)
 		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
 		if (f1Down && !f1WasDown_)
 		{
@@ -547,8 +579,10 @@ namespace scop::vk
 				wireframe_ = !wireframe_;
 				vkDeviceWaitIdle(ctx_.device());
 
-				modelPipe_.recreate(swap_.extent(), wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
+				modelPipe_.recreate(swap_.extent(),
+									wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
 
+				// Re-record with current (maybe empty) model
 				cmds_.recordScene(modelPipe_.renderPass(),
 								  fbs_.get(),
 								  swap_.extent(),
@@ -617,10 +651,7 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		if (!paused_ && autoRotate_)
-			modelTime_ += dt;
-
-		// title
+		// title (FPS + state)
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -640,6 +671,7 @@ namespace scop::vk
 				<< " | " << (autoFit_ ? "FIT" : "RAW")
 				<< " | Scale " << appliedScale
 				<< " | " << (cursorLocked_ ? "Mouse: LOCK" : "Mouse: FREE");
+
 			glfwSetWindowTitle(ctx_.window(), oss.str().c_str());
 		}
 

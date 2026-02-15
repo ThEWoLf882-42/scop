@@ -24,7 +24,13 @@ namespace scop::vk
 	{
 	public:
 		Renderer() = default;
+
+		// Default: no model loaded (grid only until you load)
 		Renderer(int width, int height, const char *title);
+
+		// NEW: load a model immediately at launch
+		Renderer(int width, int height, const char *title, const std::string &initialObjPath);
+
 		~Renderer() noexcept;
 
 		Renderer(const Renderer &) = delete;
@@ -33,6 +39,7 @@ namespace scop::vk
 		Renderer &operator=(Renderer &&) = delete;
 
 		void init(int width, int height, const char *title);
+		void init(int width, int height, const char *title, const std::string &initialObjPath);
 
 		void pollEvents();
 		bool shouldClose() const;

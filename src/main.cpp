@@ -1,17 +1,13 @@
-#include <scop/VulkanApp.hpp>
-#include <iostream>
+#include "scop/VulkanRenderer.hpp"
+#include <string>
 
-int main()
+int main(int argc, char **argv)
 {
-    try
-    {
-        scop::VulkanApp app;
-        app.run();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "Fatal: " << e.what() << "\n";
-        return 1;
-    }
+    std::string obj;
+    if (argc >= 2)
+        obj = argv[1];
+
+    scop::VulkanRenderer app;
+    app.run(obj);
     return 0;
 }
