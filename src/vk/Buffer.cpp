@@ -113,7 +113,7 @@ namespace scop::vk
 
 	void IndexBuffer::create(VkDevice device, VkPhysicalDevice physicalDevice,
 							 Uploader &uploader,
-							 const std::vector<uint16_t> &indices)
+							 const std::vector<uint32_t> &indices)
 	{
 		reset();
 

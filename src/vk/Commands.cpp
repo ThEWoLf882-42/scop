@@ -80,7 +80,7 @@ namespace scop::vk
 			VkDeviceSize offs[] = {0};
 			vkCmdBindVertexBuffers(cmd, 0, 1, vbufs, offs);
 
-			vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 			vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
 
 			vkCmdEndRenderPass(cmd);

@@ -1,43 +1,51 @@
 #include "scop/vk/Renderer.hpp"
 #include "scop/vk/Uploader.hpp"
+#include "scop/io/ObjLoader.hpp"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include "scop/math/Mat4.hpp"
 
-#include <cstdint>
 #include <vector>
-#include <cmath>
+#include <iostream>
 
 namespace
 {
-
-	using scop::vk::Vertex;
-
-	const std::vector<Vertex> kCubeVerts = {
-		{{-0.5f, -0.5f, -0.5f}, {1.f, 0.f, 0.f}},
-		{{0.5f, -0.5f, -0.5f}, {0.f, 1.f, 0.f}},
-		{{0.5f, 0.5f, -0.5f}, {0.f, 0.f, 1.f}},
-		{{-0.5f, 0.5f, -0.5f}, {1.f, 1.f, 0.f}},
-		{{-0.5f, -0.5f, 0.5f}, {1.f, 0.f, 1.f}},
-		{{0.5f, -0.5f, 0.5f}, {0.f, 1.f, 1.f}},
-		{{0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}},
-		{{-0.5f, 0.5f, 0.5f}, {0.2f, 0.2f, 0.2f}},
-	};
-
-	const std::vector<uint16_t> kCubeIdx = {
-		0, 1, 2, 2, 3, 0,
-		1, 5, 6, 6, 2, 1,
-		5, 4, 7, 7, 6, 5,
-		4, 0, 3, 3, 7, 4,
-		3, 2, 6, 6, 7, 3,
-		4, 5, 1, 1, 0, 4};
 
 	struct alignas(16) UBOData
 	{
 		scop::math::Mat4 mvp;
 	};
+
+	scop::io::MeshData makeCube()
+	{
+		using scop::vk::Vertex;
+
+		const std::vector<Vertex> v = {
+			{{-0.5f, -0.5f, -0.5f}, {1.f, 0.f, 0.f}},
+			{{0.5f, -0.5f, -0.5f}, {0.f, 1.f, 0.f}},
+			{{0.5f, 0.5f, -0.5f}, {0.f, 0.f, 1.f}},
+			{{-0.5f, 0.5f, -0.5f}, {1.f, 1.f, 0.f}},
+			{{-0.5f, -0.5f, 0.5f}, {1.f, 0.f, 1.f}},
+			{{0.5f, -0.5f, 0.5f}, {0.f, 1.f, 1.f}},
+			{{0.5f, 0.5f, 0.5f}, {1.f, 1.f, 1.f}},
+			{{-0.5f, 0.5f, 0.5f}, {0.2f, 0.2f, 0.2f}},
+		};
+
+		const std::vector<uint32_t> idx = {
+			0, 1, 2, 2, 3, 0,
+			1, 5, 6, 6, 2, 1,
+			5, 4, 7, 7, 6, 5,
+			4, 0, 3, 3, 7, 4,
+			3, 2, 6, 6, 7, 3,
+			4, 5, 1, 1, 0, 4};
+
+		scop::io::MeshData m;
+		m.vertices = v;
+		m.indices = idx;
+		return m;
+	}
 
 }
 
@@ -65,9 +73,25 @@ namespace scop::vk
 
 		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
 
+		const std::string objPath = "assets/models/42.obj";
+		scop::io::MeshData mesh;
+
+		try
+		{
+			mesh = scop::io::loadObj(objPath, true);
+			std::cerr << "Loaded OBJ: " << objPath
+					  << " verts=" << mesh.vertices.size()
+					  << " idx=" << mesh.indices.size() << "\n";
+		}
+		catch (const std::exception &e)
+		{
+			std::cerr << "OBJ load failed: " << e.what() << "\nUsing fallback cube.\n";
+			mesh = makeCube();
+		}
+
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kCubeVerts);
-		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kCubeIdx);
+		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.vertices);
+		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
 
 		cmds_ = Commands(ctx_.device(),
 						 ctx_.indices().graphicsFamily.value(),
@@ -124,7 +148,6 @@ namespace scop::vk
 
 		const VkExtent2D ext = swap_.extent();
 		const float aspect = (ext.height == 0) ? 1.0f : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
-
 		const float t = static_cast<float>(now);
 
 		const scop::math::Mat4 model =

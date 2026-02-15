@@ -77,7 +77,7 @@ namespace scop::vk
 
 		IndexBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
 					Uploader &uploader,
-					const std::vector<uint16_t> &indices)
+					const std::vector<uint32_t> &indices)
 		{
 			create(device, physicalDevice, uploader, indices);
 		}
@@ -108,7 +108,7 @@ namespace scop::vk
 
 		void create(VkDevice device, VkPhysicalDevice physicalDevice,
 					Uploader &uploader,
-					const std::vector<uint16_t> &indices);
+					const std::vector<uint32_t> &indices);
 
 		void reset() noexcept;
 
