@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <vulkan/vulkan.h>
+#include <utility>
 
 namespace scop::vk
 {
@@ -12,10 +13,11 @@ namespace scop::vk
 		Framebuffers() = default;
 
 		Framebuffers(VkDevice device, VkRenderPass renderPass,
-					 const std::vector<VkImageView> &imageViews,
+					 const std::vector<VkImageView> &colorImageViews,
+					 VkImageView depthView,
 					 VkExtent2D extent)
 		{
-			create(device, renderPass, imageViews, extent);
+			create(device, renderPass, colorImageViews, depthView, extent);
 		}
 
 		~Framebuffers() noexcept { reset(); }
@@ -37,7 +39,8 @@ namespace scop::vk
 		}
 
 		void create(VkDevice device, VkRenderPass renderPass,
-					const std::vector<VkImageView> &imageViews,
+					const std::vector<VkImageView> &colorImageViews,
+					VkImageView depthView,
 					VkExtent2D extent);
 
 		void reset() noexcept;

@@ -2,6 +2,7 @@
 
 #include "scop/vk/VkContext.hpp"
 #include "scop/vk/Swapchain.hpp"
+#include "scop/vk/Depth.hpp"
 #include "scop/vk/Pipeline.hpp"
 #include "scop/vk/Framebuffers.hpp"
 #include "scop/vk/Commands.hpp"
@@ -40,6 +41,7 @@ namespace scop::vk
 	private:
 		VkContext ctx_{};
 		Swapchain swap_{};
+		DepthResources depth_{};
 
 		UniformBuffer ubo_{};
 		Descriptors desc_{};

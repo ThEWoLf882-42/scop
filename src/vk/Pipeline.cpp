@@ -40,7 +40,7 @@ namespace
 namespace scop::vk
 {
 
-	void Pipeline::create(VkDevice device, VkFormat swapchainFormat, VkExtent2D extent,
+	void Pipeline::create(VkDevice device, VkFormat swapchainFormat, VkFormat depthFormat, VkExtent2D extent,
 						  const char *vertSpvPath, const char *fragSpvPath,
 						  VkDescriptorSetLayout setLayout)
 	{
@@ -57,26 +57,43 @@ namespace scop::vk
 		color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		color.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+		VkAttachmentDescription depth{};
+		depth.format = depthFormat;
+		depth.samples = VK_SAMPLE_COUNT_1_BIT;
+		depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depth.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		VkAttachmentDescription attachments[] = {color, depth};
+
 		VkAttachmentReference colorRef{};
 		colorRef.attachment = 0;
 		colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+		VkAttachmentReference depthRef{};
+		depthRef.attachment = 1;
+		depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 		VkSubpassDescription subpass{};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorRef;
+		subpass.pDepthStencilAttachment = &depthRef;
 
 		VkSubpassDependency dep{};
 		dep.srcSubpass = VK_SUBPASS_EXTERNAL;
 		dep.dstSubpass = 0;
-		dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+		dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+		dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
 		VkRenderPassCreateInfo rp{};
 		rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		rp.attachmentCount = 1;
-		rp.pAttachments = &color;
+		rp.attachmentCount = 2;
+		rp.pAttachments = attachments;
 		rp.subpassCount = 1;
 		rp.pSubpasses = &subpass;
 		rp.dependencyCount = 1;
@@ -146,6 +163,14 @@ namespace scop::vk
 		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+		VkPipelineDepthStencilStateCreateInfo ds{};
+		ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		ds.depthTestEnable = VK_TRUE;
+		ds.depthWriteEnable = VK_TRUE;
+		ds.depthCompareOp = VK_COMPARE_OP_LESS;
+		ds.depthBoundsTestEnable = VK_FALSE;
+		ds.stencilTestEnable = VK_FALSE;
+
 		VkPipelineColorBlendAttachmentState cba{};
 		cba.colorWriteMask =
 			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -173,6 +198,7 @@ namespace scop::vk
 		gp.pViewportState = &vp;
 		gp.pRasterizationState = &rs;
 		gp.pMultisampleState = &ms;
+		gp.pDepthStencilState = &ds;
 		gp.pColorBlendState = &cb;
 		gp.layout = layout_;
 		gp.renderPass = renderPass_;

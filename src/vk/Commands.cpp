@@ -53,8 +53,9 @@ namespace scop::vk
 			if (vkBeginCommandBuffer(cmd, &bi) != VK_SUCCESS)
 				throw std::runtime_error("vkBeginCommandBuffer failed");
 
-			VkClearValue clear{};
-			clear.color = {{0.05f, 0.08f, 0.12f, 1.0f}};
+			VkClearValue clears[2]{};
+			clears[0].color = {{0.05f, 0.08f, 0.12f, 1.0f}};
+			clears[1].depthStencil = {1.0f, 0};
 
 			VkRenderPassBeginInfo rp{};
 			rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -62,8 +63,8 @@ namespace scop::vk
 			rp.framebuffer = framebuffers[i];
 			rp.renderArea.offset = {0, 0};
 			rp.renderArea.extent = extent;
-			rp.clearValueCount = 1;
-			rp.pClearValues = &clear;
+			rp.clearValueCount = 2;
+			rp.pClearValues = clears;
 
 			vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);

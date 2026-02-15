@@ -25,7 +25,7 @@ namespace
 		scop::math::Mat4 mvp;
 	};
 
-}
+} // namespace
 
 namespace scop::vk
 {
@@ -40,15 +40,16 @@ namespace scop::vk
 		ctx_.init(width, height, title);
 
 		swap_ = Swapchain(ctx_);
+		depth_ = DepthResources(ctx_.device(), ctx_.physicalDevice(), swap_.extent());
 
 		ubo_ = UniformBuffer(ctx_.device(), ctx_.physicalDevice(), sizeof(UBOData));
 		desc_ = Descriptors(ctx_.device(), ubo_.buffer(), sizeof(UBOData));
 
-		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), swap_.extent(),
+		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
 						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
 						 desc_.layout());
 
-		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), swap_.extent());
+		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
 
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
 		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kTriangle);

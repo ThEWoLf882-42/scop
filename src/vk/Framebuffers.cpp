@@ -5,22 +5,26 @@ namespace scop::vk
 {
 
 	void Framebuffers::create(VkDevice device, VkRenderPass renderPass,
-							  const std::vector<VkImageView> &imageViews,
+							  const std::vector<VkImageView> &colorImageViews,
+							  VkImageView depthView,
 							  VkExtent2D extent)
 	{
 		reset();
 		device_ = device;
 
-		fbs_.resize(imageViews.size());
+		if (colorImageViews.empty())
+			throw std::runtime_error("Framebuffers: no swapchain image views");
 
-		for (size_t i = 0; i < imageViews.size(); ++i)
+		fbs_.resize(colorImageViews.size());
+
+		for (size_t i = 0; i < colorImageViews.size(); ++i)
 		{
-			VkImageView attachments[] = {imageViews[i]};
+			VkImageView attachments[] = {colorImageViews[i], depthView};
 
 			VkFramebufferCreateInfo ci{};
 			ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 			ci.renderPass = renderPass;
-			ci.attachmentCount = 1;
+			ci.attachmentCount = 2;
 			ci.pAttachments = attachments;
 			ci.width = extent.width;
 			ci.height = extent.height;
