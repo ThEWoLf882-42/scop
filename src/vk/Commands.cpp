@@ -77,6 +77,11 @@ namespace scop::vk
 		if (sets.size() != buffers_.size())
 			throw std::runtime_error("Commands::recordScene: descriptor set count mismatch");
 
+		const bool drawModel = (indexCount > 0 &&
+								modelPipeline != VK_NULL_HANDLE &&
+								modelVB != VK_NULL_HANDLE &&
+								modelIB != VK_NULL_HANDLE);
+
 		for (size_t i = 0; i < buffers_.size(); ++i)
 		{
 			VkCommandBuffer cmd = buffers_[i];
@@ -118,21 +123,27 @@ namespace scop::vk
 			sc.extent = extent;
 			vkCmdSetScissor(cmd, 0, 1, &sc);
 
-			// Bind descriptor once (same layout for both pipelines)
+			// Descriptor set is shared by model + lines
 			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &sets[i], 0, nullptr);
 
-			// ---- Model ----
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline);
-			VkDeviceSize off0 = 0;
-			vkCmdBindVertexBuffers(cmd, 0, 1, &modelVB, &off0);
-			vkCmdBindIndexBuffer(cmd, modelIB, 0, indexType);
-			vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+			// ---- Model (optional) ----
+			if (drawModel)
+			{
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline);
+				VkDeviceSize off0 = 0;
+				vkCmdBindVertexBuffers(cmd, 0, 1, &modelVB, &off0);
+				vkCmdBindIndexBuffer(cmd, modelIB, 0, indexType);
+				vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+			}
 
 			// ---- Grid/Axes lines ----
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linesPipeline);
-			VkDeviceSize off1 = 0;
-			vkCmdBindVertexBuffers(cmd, 0, 1, &linesVB, &off1);
-			vkCmdDraw(cmd, linesVertexCount, 1, 0, 0);
+			if (linesPipeline != VK_NULL_HANDLE && linesVB != VK_NULL_HANDLE && linesVertexCount > 0)
+			{
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linesPipeline);
+				VkDeviceSize off1 = 0;
+				vkCmdBindVertexBuffers(cmd, 0, 1, &linesVB, &off1);
+				vkCmdDraw(cmd, linesVertexCount, 1, 0, 0);
+			}
 
 			vkCmdEndRenderPass(cmd);
 

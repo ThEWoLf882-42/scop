@@ -24,6 +24,8 @@ namespace scop::vk
 
 		const std::vector<VkCommandBuffer> &buffers() const { return buffers_; }
 
+		// Records: OPTIONAL model indexed + lines non-indexed (grid/axes) in same render pass
+		// If indexCount == 0 (or model buffers are NULL), model draw is skipped.
 		void recordScene(VkRenderPass renderPass,
 						 const std::vector<VkFramebuffer> &framebuffers,
 						 VkExtent2D extent,

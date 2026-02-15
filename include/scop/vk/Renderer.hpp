@@ -43,7 +43,7 @@ namespace scop::vk
 
 	private:
 		void recreateSwapchain();
-		bool loadModelFromPath(const std::string &path); // NEW
+		bool loadModelFromPath(const std::string &path);
 
 		VkContext ctx_{};
 		Swapchain swap_{};
@@ -57,21 +57,24 @@ namespace scop::vk
 
 		Framebuffers fbs_{};
 
+		// model geometry
+		bool hasModel_ = false;
 		VertexBuffer vb_{};
 		IndexBuffer ib_{};
 
+		// grid/axes
 		VertexBuffer linesVB_{};
 		uint32_t linesVertexCount_ = 0;
 
 		Commands cmds_{};
 		FramePresenter presenter_{};
 
-		// ---- drag & drop playlist ----
+		// drag & drop playlist
 		std::vector<std::string> droppedObjs_;
 		size_t droppedIndex_ = 0;
 		bool hasPendingLoad_ = false;
 		std::string pendingPath_;
-		std::string modelLabel_ = "assets/model.obj";
+		std::string modelLabel_ = "Drop .obj onto window";
 		bool lbWasDown_ = false;
 		bool rbWasDown_ = false;
 
