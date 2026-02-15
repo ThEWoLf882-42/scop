@@ -77,7 +77,8 @@ namespace
 
 	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
 
-}
+} // namespace
+
 namespace scop::vk
 {
 
@@ -139,7 +140,6 @@ namespace scop::vk
 				const float sens = 0.12f;
 				self->yawDeg_ += static_cast<float>(dx) * sens;
 				self->pitchDeg_ -= static_cast<float>(dy) * sens;
-
 				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
 			});
 
@@ -202,6 +202,7 @@ namespace scop::vk
 
 		desc_ = Descriptors(ctx_.device(), uboBuffers, sizeof(UBOData));
 
+		// IMPORTANT: pipeline mode must match current wireframe state
 		VkPolygonMode mode = VK_POLYGON_MODE_FILL;
 		if (wireframe_ && ctx_.wireframeSupported())
 			mode = VK_POLYGON_MODE_LINE;
@@ -256,6 +257,7 @@ namespace scop::vk
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
+		// FPS title (and show WF/FILL)
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -274,6 +276,7 @@ namespace scop::vk
 			glfwSetWindowTitle(ctx_.window(), oss.str().c_str());
 		}
 
+		// ESC toggles mouse lock
 		const bool escDown = glfwGetKey(ctx_.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
 		if (escDown && !escWasDown_)
 		{
@@ -284,6 +287,7 @@ namespace scop::vk
 		}
 		escWasDown_ = escDown;
 
+		// R resets camera
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
 		{
@@ -297,14 +301,50 @@ namespace scop::vk
 		}
 		rWasDown_ = rDown;
 
+		// SPACE pauses model rotation
 		const bool spDown = glfwGetKey(ctx_.window(), GLFW_KEY_SPACE) == GLFW_PRESS;
 		if (spDown && !spaceWasDown_)
 			paused_ = !paused_;
 		spaceWasDown_ = spDown;
 
+		// F1 toggles wireframe (rebuild pipeline + re-record commands)
+		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
+		if (f1Down && !f1WasDown_)
+		{
+			if (!ctx_.wireframeSupported())
+			{
+				if (!warnedNoWire_)
+				{
+					warnedNoWire_ = true;
+					std::cerr << "Wireframe not supported (fillModeNonSolid not available).\n";
+				}
+			}
+			else
+			{
+				wireframe_ = !wireframe_;
+
+				vkDeviceWaitIdle(ctx_.device());
+
+				pipe_.recreate(
+					swap_.extent(),
+					wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
+
+				cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
+									pipe_.pipeline(),
+									pipe_.layout(),
+									desc_.sets(),
+									vb_.buffer(),
+									ib_.buffer(),
+									ib_.count(),
+									VK_INDEX_TYPE_UINT32);
+			}
+		}
+		f1WasDown_ = f1Down;
+
 		if (!paused_)
 			modelTime_ += dt;
 
+		// camera vectors from yaw/pitch
 		const float yaw = degToRad(yawDeg_);
 		const float pitch = degToRad(pitchDeg_);
 
@@ -355,39 +395,7 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
-		if (f1Down && !f1WasDown_)
-		{
-			if (!ctx_.wireframeSupported())
-			{
-				if (!warnedNoWire_)
-				{
-					warnedNoWire_ = true;
-					std::cerr << "Wireframe not supported (fillModeNonSolid not available).\n";
-				}
-			}
-			else
-			{
-				wireframe_ = !wireframe_;
-
-				vkDeviceWaitIdle(ctx_.device());
-
-				pipe_.recreate(
-					swap_.extent(),
-					wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
-
-				cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
-									pipe_.pipeline(),
-									pipe_.layout(),
-									desc_.sets(),
-									vb_.buffer(),
-									ib_.buffer(),
-									ib_.count(),
-									VK_INDEX_TYPE_UINT32);
-			}
-		}
-		f1WasDown_ = f1Down;
-
+		// acquire
 		uint32_t imageIndex = 0;
 		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
 		{
@@ -409,9 +417,7 @@ namespace scop::vk
 		const scop::math::Vec3 center{camX_ + forward.x, camY_ + forward.y, camZ_ + forward.z};
 
 		const scop::math::Mat4 view = scop::math::Mat4::lookAt(eye, center, up);
-
-		const scop::math::Mat4 proj =
-			scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 80.0f, true);
+		const scop::math::Mat4 proj = scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 80.0f, true);
 
 		UBOData u{};
 		u.model = model;
@@ -421,17 +427,14 @@ namespace scop::vk
 		u.lightDir[1] = -1.0f;
 		u.lightDir[2] = 0.4f;
 		u.lightDir[3] = 0.0f;
-
 		u.baseColor[0] = 0.82f;
 		u.baseColor[1] = 0.85f;
 		u.baseColor[2] = 0.92f;
 		u.baseColor[3] = 0.0f;
-
 		u.cameraPos[0] = camX_;
 		u.cameraPos[1] = camY_;
 		u.cameraPos[2] = camZ_;
 		u.cameraPos[3] = 0.0f;
-
 		u.spec[0] = 0.55f;
 		u.spec[1] = 64.0f;
 		u.spec[2] = 0.0f;
@@ -446,4 +449,4 @@ namespace scop::vk
 		}
 	}
 
-}
+} // namespace scop::vk

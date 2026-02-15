@@ -75,6 +75,7 @@ namespace scop::vk
 		bool escWasDown_ = false;
 		bool rWasDown_ = false;
 		bool spaceWasDown_ = false;
+
 		bool f1WasDown_ = false;
 		bool wireframe_ = false;
 		bool warnedNoWire_ = false;
