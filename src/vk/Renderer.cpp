@@ -20,13 +20,12 @@ namespace
 	{
 		scop::math::Mat4 mvp;
 		scop::math::Mat4 model;
-		float lightDir[4];	// xyz + padding
-		float baseColor[4]; // rgb + padding
-		float cameraPos[4]; // xyz + padding
-		float spec[4];		// x=specStrength, y=shininess
+		float lightDir[4];
+		float baseColor[4];
+		float cameraPos[4];
+		float spec[4];
 	};
 
-	// Proper flat-shaded cube fallback: 24 verts (4 per face), 36 indices
 	scop::io::MeshData makeCube()
 	{
 		using scop::vk::Vertex;
@@ -50,17 +49,11 @@ namespace
 			v.push_back(D);
 		};
 
-		// +Z
 		pushFace(0, 0, 1, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f);
-		// -Z
 		pushFace(0, 0, -1, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f);
-		// +X
 		pushFace(1, 0, 0, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f);
-		// -X
 		pushFace(-1, 0, 0, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f);
-		// +Y
 		pushFace(0, 1, 0, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f);
-		// -Y
 		pushFace(0, -1, 0, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f);
 
 		std::vector<uint32_t> idx;
@@ -84,8 +77,7 @@ namespace
 
 	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
 
-} // namespace
-
+}
 namespace scop::vk
 {
 
@@ -100,7 +92,6 @@ namespace scop::vk
 
 		glfwSetWindowUserPointer(ctx_.window(), this);
 
-		// resize callback
 		glfwSetFramebufferSizeCallback(
 			ctx_.window(),
 			[](GLFWwindow *win, int /*w*/, int /*h*/)
@@ -110,7 +101,6 @@ namespace scop::vk
 					self->framebufferResized_ = true;
 			});
 
-		// scroll zoom (FOV)
 		glfwSetScrollCallback(
 			ctx_.window(),
 			[](GLFWwindow *win, double /*xoff*/, double yoff)
@@ -122,7 +112,6 @@ namespace scop::vk
 				self->fovDeg_ = std::clamp(self->fovDeg_, 20.0f, 90.0f);
 			});
 
-		// mouse look
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		cursorLocked_ = true;
 
@@ -154,7 +143,6 @@ namespace scop::vk
 				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
 			});
 
-		// ---- Load mesh (once) ----
 		const std::string objPath = "assets/models/42.obj";
 		scop::io::MeshData mesh;
 
@@ -214,9 +202,13 @@ namespace scop::vk
 
 		desc_ = Descriptors(ctx_.device(), uboBuffers, sizeof(UBOData));
 
+		VkPolygonMode mode = VK_POLYGON_MODE_FILL;
+		if (wireframe_ && ctx_.wireframeSupported())
+			mode = VK_POLYGON_MODE_LINE;
+
 		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
 						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
-						 desc_.layout());
+						 desc_.layout(), mode);
 
 		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
 
@@ -264,7 +256,6 @@ namespace scop::vk
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
-		// FPS overlay (update title ~2 times/sec)
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -278,22 +269,21 @@ namespace scop::vk
 			oss.setf(std::ios::fixed);
 			oss << "scop | FPS " << fps
 				<< " | FOV " << fovDeg_
+				<< " | " << (wireframe_ ? "WF" : "FILL")
 				<< " | " << (cursorLocked_ ? "Mouse: LOCK" : "Mouse: FREE");
 			glfwSetWindowTitle(ctx_.window(), oss.str().c_str());
 		}
 
-		// ESC toggles mouse capture
 		const bool escDown = glfwGetKey(ctx_.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS;
 		if (escDown && !escWasDown_)
 		{
 			cursorLocked_ = !cursorLocked_;
 			glfwSetInputMode(ctx_.window(), GLFW_CURSOR,
 							 cursorLocked_ ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-			firstMouse_ = true; // avoid jump when re-locking
+			firstMouse_ = true;
 		}
 		escWasDown_ = escDown;
 
-		// R resets camera
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
 		{
@@ -307,7 +297,6 @@ namespace scop::vk
 		}
 		rWasDown_ = rDown;
 
-		// SPACE pauses model rotation
 		const bool spDown = glfwGetKey(ctx_.window(), GLFW_KEY_SPACE) == GLFW_PRESS;
 		if (spDown && !spaceWasDown_)
 			paused_ = !paused_;
@@ -316,7 +305,6 @@ namespace scop::vk
 		if (!paused_)
 			modelTime_ += dt;
 
-		// build camera forward/right/up from yaw/pitch
 		const float yaw = degToRad(yawDeg_);
 		const float pitch = degToRad(pitchDeg_);
 
@@ -330,7 +318,6 @@ namespace scop::vk
 		scop::math::Vec3 right = scop::math::normalize(scop::math::cross(forward, worldUp));
 		scop::math::Vec3 up = scop::math::cross(right, forward);
 
-		// movement
 		float speed = 2.5f;
 		if (glfwGetKey(ctx_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
 			speed *= 3.0f;
@@ -368,7 +355,39 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		// acquire
+		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
+		if (f1Down && !f1WasDown_)
+		{
+			if (!ctx_.wireframeSupported())
+			{
+				if (!warnedNoWire_)
+				{
+					warnedNoWire_ = true;
+					std::cerr << "Wireframe not supported (fillModeNonSolid not available).\n";
+				}
+			}
+			else
+			{
+				wireframe_ = !wireframe_;
+
+				vkDeviceWaitIdle(ctx_.device());
+
+				pipe_.recreate(
+					swap_.extent(),
+					wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
+
+				cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
+									pipe_.pipeline(),
+									pipe_.layout(),
+									desc_.sets(),
+									vb_.buffer(),
+									ib_.buffer(),
+									ib_.count(),
+									VK_INDEX_TYPE_UINT32);
+			}
+		}
+		f1WasDown_ = f1Down;
+
 		uint32_t imageIndex = 0;
 		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
 		{
@@ -398,27 +417,23 @@ namespace scop::vk
 		u.model = model;
 		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
 
-		// light direction (world space)
 		u.lightDir[0] = 0.6f;
 		u.lightDir[1] = -1.0f;
 		u.lightDir[2] = 0.4f;
 		u.lightDir[3] = 0.0f;
 
-		// base color
 		u.baseColor[0] = 0.82f;
 		u.baseColor[1] = 0.85f;
 		u.baseColor[2] = 0.92f;
 		u.baseColor[3] = 0.0f;
 
-		// camera position (specular)
 		u.cameraPos[0] = camX_;
 		u.cameraPos[1] = camY_;
 		u.cameraPos[2] = camZ_;
 		u.cameraPos[3] = 0.0f;
 
-		// specular
-		u.spec[0] = 0.55f; // strength
-		u.spec[1] = 64.0f; // shininess
+		u.spec[0] = 0.55f;
+		u.spec[1] = 64.0f;
 		u.spec[2] = 0.0f;
 		u.spec[3] = 0.0f;
 
@@ -431,4 +446,4 @@ namespace scop::vk
 		}
 	}
 
-} // namespace scop::vk
+}

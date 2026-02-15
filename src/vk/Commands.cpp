@@ -53,6 +53,7 @@ namespace scop::vk
 			VkCommandBufferBeginInfo bi{};
 			bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
+			vkResetCommandBuffer(cmd, 0);
 			if (vkBeginCommandBuffer(cmd, &bi) != VK_SUCCESS)
 				throw std::runtime_error("vkBeginCommandBuffer failed");
 

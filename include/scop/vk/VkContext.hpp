@@ -41,6 +41,8 @@ namespace scop::vk
 
 		QueueFamilyIndices findQueueFamilies(VkPhysicalDevice dev) const;
 
+		bool wireframeSupported() const { return wireframeSupported_; }
+
 	private:
 		void initWindow_(int width, int height, const char *title);
 		void initInstanceAndSurface_();
@@ -49,6 +51,7 @@ namespace scop::vk
 
 	private:
 		bool glfwInited_ = false;
+		bool wireframeSupported_ = false;
 		GLFWwindow *window_ = nullptr;
 
 		VkInstance instance_ = VK_NULL_HANDLE;

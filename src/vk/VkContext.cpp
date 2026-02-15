@@ -342,6 +342,14 @@ namespace scop::vk
 
 		VkPhysicalDeviceFeatures features{};
 
+		VkPhysicalDeviceFeatures supported{};
+		vkGetPhysicalDeviceFeatures(physicalDevice_, &supported);
+
+		wireframeSupported_ = (supported.fillModeNonSolid == VK_TRUE);
+
+		if (wireframeSupported_)
+			features.fillModeNonSolid = VK_TRUE;
+
 		VkDeviceCreateInfo ci{};
 		ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		ci.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
