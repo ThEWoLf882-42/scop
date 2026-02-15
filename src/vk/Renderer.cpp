@@ -77,20 +77,20 @@ namespace
 	static float pz(const V &v) { return pz_impl(v, 0); }
 
 	// Vertex.normal is used as COLOR for lines
-	std::vector<scop::vk::Vertex> makeGridAxes(int half = 10, float step = 1.0f)
+	static void pushLine(std::vector<scop::vk::Vertex> &out,
+						 float x1, float y1, float z1,
+						 float x2, float y2, float z2,
+						 float r, float g, float b)
+	{
+		using scop::vk::Vertex;
+		out.push_back(Vertex{{x1, y1, z1}, {r, g, b}});
+		out.push_back(Vertex{{x2, y2, z2}, {r, g, b}});
+	}
+
+	static std::vector<scop::vk::Vertex> makeGridAxes(int half = 10, float step = 1.0f)
 	{
 		using scop::vk::Vertex;
 		std::vector<Vertex> out;
-
-		auto pushLine = [&](float x1, float y1, float z1,
-							float x2, float y2, float z2,
-							float r, float g, float b)
-		{
-			Vertex a{{x1, y1, z1}, {r, g, b}};
-			Vertex c{{x2, y2, z2}, {r, g, b}};
-			out.push_back(a);
-			out.push_back(c);
-		};
 
 		const float y = 0.0f;
 		const float size = static_cast<float>(half) * step;
@@ -101,14 +101,14 @@ namespace
 			const bool center = (i == 0);
 			const float k = center ? 0.35f : 0.18f;
 
-			pushLine(-size, y, p, size, y, p, k, k, k);
-			pushLine(p, y, -size, p, y, size, k, k, k);
+			pushLine(out, -size, y, p, size, y, p, k, k, k);
+			pushLine(out, p, y, -size, p, y, size, k, k, k);
 		}
 
 		const float ax = size * 1.15f;
-		pushLine(0, 0, 0, ax, 0, 0, 1.f, 0.f, 0.f);
-		pushLine(0, 0, 0, 0, ax, 0, 0.f, 1.f, 0.f);
-		pushLine(0, 0, 0, 0, 0, ax, 0.f, 0.f, 1.f);
+		pushLine(out, 0, 0, 0, ax, 0, 0, 1.f, 0.f, 0.f);
+		pushLine(out, 0, 0, 0, 0, ax, 0, 0.f, 1.f, 0.f);
+		pushLine(out, 0, 0, 0, 0, 0, ax, 0.f, 0.f, 1.f);
 
 		return out;
 	}
@@ -134,6 +134,47 @@ namespace scop::vk
 			vkDeviceWaitIdle(ctx_.device());
 	}
 
+	void Renderer::rebuildDebugLines()
+	{
+		std::vector<Vertex> lines = makeGridAxes(10, 1.0f);
+
+		if (showBounds_ && hasModel_)
+		{
+			const float r = 1.0f, g = 1.0f, b = 0.15f;
+
+			const float minX = aabbMin_[0], minY = aabbMin_[1], minZ = aabbMin_[2];
+			const float maxX = aabbMax_[0], maxY = aabbMax_[1], maxZ = aabbMax_[2];
+
+			// 8 corners
+			const float x0 = minX, x1 = maxX;
+			const float y0 = minY, y1 = maxY;
+			const float z0 = minZ, z1 = maxZ;
+
+			// bottom rectangle
+			pushLine(lines, x0, y0, z0, x1, y0, z0, r, g, b);
+			pushLine(lines, x1, y0, z0, x1, y0, z1, r, g, b);
+			pushLine(lines, x1, y0, z1, x0, y0, z1, r, g, b);
+			pushLine(lines, x0, y0, z1, x0, y0, z0, r, g, b);
+
+			// top rectangle
+			pushLine(lines, x0, y1, z0, x1, y1, z0, r, g, b);
+			pushLine(lines, x1, y1, z0, x1, y1, z1, r, g, b);
+			pushLine(lines, x1, y1, z1, x0, y1, z1, r, g, b);
+			pushLine(lines, x0, y1, z1, x0, y1, z0, r, g, b);
+
+			// vertical edges
+			pushLine(lines, x0, y0, z0, x0, y1, z0, r, g, b);
+			pushLine(lines, x1, y0, z0, x1, y1, z0, r, g, b);
+			pushLine(lines, x1, y0, z1, x1, y1, z1, r, g, b);
+			pushLine(lines, x0, y0, z1, x0, y1, z1, r, g, b);
+		}
+
+		linesVertexCount_ = static_cast<uint32_t>(lines.size());
+
+		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
+		linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
+	}
+
 	bool Renderer::loadModelFromPath(const std::string &path)
 	{
 		scop::io::MeshData mesh;
@@ -146,6 +187,8 @@ namespace scop::vk
 			std::cerr << "OBJ load failed: " << e.what() << "\n";
 			std::cerr << "No fallback mesh. Provide a valid .obj.\n";
 			hasModel_ = false;
+			modelVertexCount_ = 0;
+			modelIndexCount_ = 0;
 			modelLabel_ = "Drop .obj onto window";
 			return false;
 		}
@@ -154,11 +197,16 @@ namespace scop::vk
 		{
 			std::cerr << "OBJ loaded but has no geometry.\n";
 			hasModel_ = false;
+			modelVertexCount_ = 0;
+			modelIndexCount_ = 0;
 			modelLabel_ = "Drop .obj onto window";
 			return false;
 		}
 
-		// Auto-fit (recompute per model)
+		modelVertexCount_ = static_cast<uint32_t>(mesh.vertices.size());
+		modelIndexCount_ = static_cast<uint32_t>(mesh.indices.size());
+
+		// AABB (model space)
 		{
 			float minX = std::numeric_limits<float>::infinity();
 			float minY = std::numeric_limits<float>::infinity();
@@ -177,6 +225,14 @@ namespace scop::vk
 				maxZ = std::max(maxZ, pz(v));
 			}
 
+			aabbMin_[0] = minX;
+			aabbMin_[1] = minY;
+			aabbMin_[2] = minZ;
+			aabbMax_[0] = maxX;
+			aabbMax_[1] = maxY;
+			aabbMax_[2] = maxZ;
+
+			// Auto-fit based on AABB
 			const float cx = (minX + maxX) * 0.5f;
 			const float cz = (minZ + maxZ) * 0.5f;
 
@@ -207,6 +263,10 @@ namespace scop::vk
 		hasModel_ = true;
 		modelLabel_ = baseName(path);
 
+		// If bbox is enabled, rebuild the debug lines buffer (grid + bbox)
+		if (showBounds_)
+			rebuildDebugLines();
+
 		// re-record if rendering is already set up
 		if (!fbs_.get().empty() && modelPipe_.pipeline() != VK_NULL_HANDLE)
 		{
@@ -216,9 +276,9 @@ namespace scop::vk
 							  modelPipe_.pipeline(),
 							  modelPipe_.layout(),
 							  desc_.sets(),
-							  vb_.buffer(),
-							  ib_.buffer(),
-							  ib_.count(),
+							  hasModel_ ? vb_.buffer() : VK_NULL_HANDLE,
+							  hasModel_ ? ib_.buffer() : VK_NULL_HANDLE,
+							  hasModel_ ? ib_.count() : 0u,
 							  VK_INDEX_TYPE_UINT32,
 							  linesPipe_.pipeline(),
 							  linesVB_.buffer(),
@@ -265,7 +325,7 @@ namespace scop::vk
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		cursorLocked_ = true;
 
-		// Auto-unlock when losing focus (helps drag from Finder)
+		// Auto-unlock on focus loss (helps drag from Finder)
 		glfwSetWindowFocusCallback(ctx_.window(), [](GLFWwindow *win, int focused)
 								   {
         auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win));
@@ -342,19 +402,16 @@ namespace scop::vk
 				std::cerr << "Use [ and ] to cycle.\n";
 			});
 
-		// Grid/Axes (always)
-		const auto lines = makeGridAxes(10, 1.0f);
-		linesVertexCount_ = static_cast<uint32_t>(lines.size());
-		{
-			Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-			linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
-		}
-
-		// No model by default
+		// start: no model
 		hasModel_ = false;
+		modelVertexCount_ = 0;
+		modelIndexCount_ = 0;
 		modelLabel_ = "Drop .obj onto window";
 
-		// If user provided an initial OBJ, load it now (no cube fallback)
+		// build grid lines buffer now (bbox off by default)
+		rebuildDebugLines();
+
+		// If initial OBJ is provided, load it now
 		if (!initialObjPath.empty())
 		{
 			if (endsWithObj(initialObjPath) && loadModelFromPath(initialObjPath))
@@ -507,7 +564,7 @@ namespace scop::vk
 		}
 		escWasDown_ = escDown;
 
-		// R resets camera (also fixes -Wunused-private-field for rWasDown_)
+		// R resets camera
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
 		{
@@ -520,6 +577,33 @@ namespace scop::vk
 			firstMouse_ = true;
 		}
 		rWasDown_ = rDown;
+
+		// B toggles bounding box
+		const bool bDown = glfwGetKey(ctx_.window(), GLFW_KEY_B) == GLFW_PRESS;
+		if (bDown && !bWasDown_)
+		{
+			showBounds_ = !showBounds_;
+			vkDeviceWaitIdle(ctx_.device());
+			rebuildDebugLines();
+
+			if (!fbs_.get().empty() && modelPipe_.pipeline() != VK_NULL_HANDLE)
+			{
+				cmds_.recordScene(modelPipe_.renderPass(),
+								  fbs_.get(),
+								  swap_.extent(),
+								  modelPipe_.pipeline(),
+								  modelPipe_.layout(),
+								  desc_.sets(),
+								  hasModel_ ? vb_.buffer() : VK_NULL_HANDLE,
+								  hasModel_ ? ib_.buffer() : VK_NULL_HANDLE,
+								  hasModel_ ? ib_.count() : 0u,
+								  VK_INDEX_TYPE_UINT32,
+								  linesPipe_.pipeline(),
+								  linesVB_.buffer(),
+								  linesVertexCount_);
+			}
+		}
+		bWasDown_ = bDown;
 
 		// SPACE pauses
 		const bool spDown = glfwGetKey(ctx_.window(), GLFW_KEY_SPACE) == GLFW_PRESS;
@@ -559,10 +643,7 @@ namespace scop::vk
 		plusWasDown_ = plusDown;
 		minusWasDown_ = minusDown;
 
-		if (!paused_ && autoRotate_)
-			modelTime_ += dt;
-
-		// F1 wireframe toggle (rebuild model pipeline + re-record command buffers)
+		// F1 wireframe toggle
 		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
 		if (f1Down && !f1WasDown_)
 		{
@@ -582,7 +663,6 @@ namespace scop::vk
 				modelPipe_.recreate(swap_.extent(),
 									wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
 
-				// Re-record with current (maybe empty) model
 				cmds_.recordScene(modelPipe_.renderPass(),
 								  fbs_.get(),
 								  swap_.extent(),
@@ -599,6 +679,9 @@ namespace scop::vk
 			}
 		}
 		f1WasDown_ = f1Down;
+
+		if (!paused_ && autoRotate_)
+			modelTime_ += dt;
 
 		// camera vectors
 		const float yaw = degToRad(yawDeg_);
@@ -651,7 +734,7 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		// title (FPS + state)
+		// title (FPS + stats)
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -661,6 +744,7 @@ namespace scop::vk
 			fpsFrames_ = 0;
 
 			const float appliedScale = (autoFit_ ? fitScale_ : 1.0f) * userScale_;
+			const uint32_t tris = hasModel_ ? (modelIndexCount_ / 3u) : 0u;
 
 			std::ostringstream oss;
 			oss.setf(std::ios::fixed);
@@ -670,8 +754,15 @@ namespace scop::vk
 				<< " | " << (wireframe_ ? "WF" : "FILL")
 				<< " | " << (autoFit_ ? "FIT" : "RAW")
 				<< " | Scale " << appliedScale
-				<< " | " << (cursorLocked_ ? "Mouse: LOCK" : "Mouse: FREE");
+				<< " | BBox " << (showBounds_ ? "ON" : "OFF");
 
+			if (hasModel_)
+			{
+				oss << " | V " << modelVertexCount_
+					<< " | T " << tris;
+			}
+
+			oss << " | " << (cursorLocked_ ? "Mouse: LOCK" : "Mouse: FREE");
 			glfwSetWindowTitle(ctx_.window(), oss.str().c_str());
 		}
 
@@ -737,4 +828,4 @@ namespace scop::vk
 		}
 	}
 
-}
+} // namespace scop::vk

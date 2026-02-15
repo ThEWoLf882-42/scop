@@ -28,7 +28,7 @@ namespace scop::vk
 		// Default: no model loaded (grid only until you load)
 		Renderer(int width, int height, const char *title);
 
-		// NEW: load a model immediately at launch
+		// Load a model immediately at launch (command line path)
 		Renderer(int width, int height, const char *title, const std::string &initialObjPath);
 
 		~Renderer() noexcept;
@@ -53,6 +53,9 @@ namespace scop::vk
 		void recreateSwapchain();
 		bool loadModelFromPath(const std::string &path);
 
+		// NEW: rebuild grid (+ optional bbox) line buffer
+		void rebuildDebugLines();
+
 		VkContext ctx_{};
 		Swapchain swap_{};
 		DepthResources depth_{};
@@ -70,7 +73,13 @@ namespace scop::vk
 		VertexBuffer vb_{};
 		IndexBuffer ib_{};
 
-		// grid/axes
+		// model stats + AABB (model space)
+		uint32_t modelVertexCount_ = 0;
+		uint32_t modelIndexCount_ = 0;
+		float aabbMin_[3]{0.f, 0.f, 0.f};
+		float aabbMax_[3]{0.f, 0.f, 0.f};
+
+		// grid/axes (+ optional bbox) lines
 		VertexBuffer linesVB_{};
 		uint32_t linesVertexCount_ = 0;
 
@@ -103,7 +112,7 @@ namespace scop::vk
 		bool rWasDown_ = false;
 		bool spaceWasDown_ = false;
 
-		// wireframe toggle (model only)
+		// wireframe toggle
 		bool f1WasDown_ = false;
 		bool wireframe_ = false;
 		bool warnedNoWire_ = false;
@@ -124,6 +133,10 @@ namespace scop::vk
 
 		bool autoRotate_ = true;
 
+		// NEW: bbox toggle
+		bool showBounds_ = false;
+		bool bWasDown_ = false;
+
 		bool paused_ = false;
 		float modelTime_ = 0.0f;
 
@@ -135,4 +148,4 @@ namespace scop::vk
 		bool framebufferResized_ = false;
 	};
 
-}
+} // namespace scop::vk
