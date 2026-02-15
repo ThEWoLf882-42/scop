@@ -82,7 +82,6 @@ namespace scop::vk
 
 		const VkDeviceSize size = sizeof(vertices[0]) * vertices.size();
 
-		// staging
 		AllocatedBuffer staging = createBuffer(
 			device_, physicalDevice_, size,
 			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -93,7 +92,6 @@ namespace scop::vk
 		std::memcpy(data, vertices.data(), static_cast<size_t>(size));
 		vkUnmapMemory(device_, staging.memory);
 
-		// device local
 		buf_ = createBuffer(
 			device_, physicalDevice_, size,
 			VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,

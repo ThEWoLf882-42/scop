@@ -4,6 +4,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "scop/math/Mat4.hpp"
+
+#include <cstdint>
 #include <vector>
 
 namespace
@@ -17,7 +20,12 @@ namespace
 
 	const std::vector<uint16_t> kIndices = {0, 1, 2};
 
-} // namespace
+	struct alignas(16) UBOData
+	{
+		scop::math::Mat4 mvp;
+	};
+
+}
 
 namespace scop::vk
 {
@@ -32,13 +40,17 @@ namespace scop::vk
 		ctx_.init(width, height, title);
 
 		swap_ = Swapchain(ctx_);
+
+		ubo_ = UniformBuffer(ctx_.device(), ctx_.physicalDevice(), sizeof(UBOData));
+		desc_ = Descriptors(ctx_.device(), ubo_.buffer(), sizeof(UBOData));
+
 		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), swap_.extent(),
-						 "shaders/tri.vert.spv", "shaders/tri.frag.spv");
+						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
+						 desc_.layout());
 
 		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), swap_.extent());
 
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
-
 		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kTriangle);
 		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, kIndices);
 
@@ -48,6 +60,8 @@ namespace scop::vk
 
 		cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
 							pipe_.pipeline(),
+							pipe_.layout(),
+							desc_.set(),
 							vb_.buffer(),
 							ib_.buffer(),
 							ib_.count());
@@ -71,6 +85,14 @@ namespace scop::vk
 		glfwSetWindowShouldClose(ctx_.window(), GLFW_TRUE);
 	}
 
-	void Renderer::draw() { presenter_.draw(); }
+	void Renderer::draw()
+	{
+		const float t = static_cast<float>(glfwGetTime());
+		UBOData u{};
+		u.mvp = scop::math::Mat4::rotationZ(t);
+		ubo_.update(&u, sizeof(u));
+
+		presenter_.draw();
+	}
 
 }

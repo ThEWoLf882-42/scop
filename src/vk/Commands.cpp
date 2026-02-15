@@ -34,6 +34,8 @@ namespace scop::vk
 		const std::vector<VkFramebuffer> &framebuffers,
 		VkExtent2D extent,
 		VkPipeline pipeline,
+		VkPipelineLayout pipelineLayout,
+		VkDescriptorSet descriptorSet,
 		VkBuffer vertexBuffer,
 		VkBuffer indexBuffer,
 		uint32_t indexCount)
@@ -65,6 +67,13 @@ namespace scop::vk
 
 			vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+			vkCmdBindDescriptorSets(
+				cmd,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				pipelineLayout,
+				0, 1, &descriptorSet,
+				0, nullptr);
 
 			VkBuffer vbufs[] = {vertexBuffer};
 			VkDeviceSize offs[] = {0};

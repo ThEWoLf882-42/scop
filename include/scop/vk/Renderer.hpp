@@ -7,7 +7,8 @@
 #include "scop/vk/Commands.hpp"
 #include "scop/vk/Buffer.hpp"
 #include "scop/vk/FramePresenter.hpp"
-#include "scop/vk/Vertex.hpp"
+#include "scop/vk/UniformBuffer.hpp"
+#include "scop/vk/Descriptors.hpp"
 
 struct GLFWwindow;
 
@@ -39,10 +40,16 @@ namespace scop::vk
 	private:
 		VkContext ctx_{};
 		Swapchain swap_{};
+
+		UniformBuffer ubo_{};
+		Descriptors desc_{};
+
 		Pipeline pipe_{};
 		Framebuffers fbs_{};
+
 		VertexBuffer vb_{};
 		IndexBuffer ib_{};
+
 		Commands cmds_{};
 		FramePresenter presenter_{};
 	};

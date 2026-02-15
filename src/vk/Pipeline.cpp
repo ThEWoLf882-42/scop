@@ -41,7 +41,8 @@ namespace scop::vk
 {
 
 	void Pipeline::create(VkDevice device, VkFormat swapchainFormat, VkExtent2D extent,
-						  const char *vertSpvPath, const char *fragSpvPath)
+						  const char *vertSpvPath, const char *fragSpvPath,
+						  VkDescriptorSetLayout setLayout)
 	{
 		reset();
 		device_ = device;
@@ -157,6 +158,8 @@ namespace scop::vk
 
 		VkPipelineLayoutCreateInfo pl{};
 		pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pl.setLayoutCount = 1;
+		pl.pSetLayouts = &setLayout;
 
 		if (vkCreatePipelineLayout(device_, &pl, nullptr, &layout_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreatePipelineLayout failed");

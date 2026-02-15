@@ -46,6 +46,8 @@ namespace scop::vk
 			const std::vector<VkFramebuffer> &framebuffers,
 			VkExtent2D extent,
 			VkPipeline pipeline,
+			VkPipelineLayout pipelineLayout,
+			VkDescriptorSet descriptorSet,
 			VkBuffer vertexBuffer,
 			VkBuffer indexBuffer,
 			uint32_t indexCount);

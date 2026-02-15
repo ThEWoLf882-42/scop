@@ -12,9 +12,10 @@ namespace scop::vk
 		Pipeline() = default;
 
 		Pipeline(VkDevice device, VkFormat swapchainFormat, VkExtent2D extent,
-				 const char *vertSpvPath, const char *fragSpvPath)
+				 const char *vertSpvPath, const char *fragSpvPath,
+				 VkDescriptorSetLayout setLayout)
 		{
-			create(device, swapchainFormat, extent, vertSpvPath, fragSpvPath);
+			create(device, swapchainFormat, extent, vertSpvPath, fragSpvPath, setLayout);
 		}
 
 		~Pipeline() noexcept { reset(); }
@@ -42,7 +43,8 @@ namespace scop::vk
 		}
 
 		void create(VkDevice device, VkFormat swapchainFormat, VkExtent2D extent,
-					const char *vertSpvPath, const char *fragSpvPath);
+					const char *vertSpvPath, const char *fragSpvPath,
+					VkDescriptorSetLayout setLayout);
 
 		void reset() noexcept;
 
