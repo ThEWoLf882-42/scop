@@ -188,7 +188,7 @@ namespace scop::vk
 			});
 
 		// ---- Load mesh ----
-		const std::string objPath = "assets/model.obj";
+		const std::string objPath = "assets/models/42.obj";
 		scop::io::MeshData mesh;
 
 		try

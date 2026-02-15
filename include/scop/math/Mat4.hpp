@@ -26,6 +26,7 @@ namespace scop::math
 
 	struct Mat4
 	{
+		// Column-major
 		float m[16];
 
 		static Mat4 identity()
@@ -44,6 +45,26 @@ namespace scop::math
 			r.m[12] = x;
 			r.m[13] = y;
 			r.m[14] = z;
+			return r;
+		}
+
+		static Mat4 scale(float s)
+		{
+			Mat4 r{};
+			r.m[0] = s;
+			r.m[5] = s;
+			r.m[10] = s;
+			r.m[15] = 1.f;
+			return r;
+		}
+
+		static Mat4 scale(float x, float y, float z)
+		{
+			Mat4 r{};
+			r.m[0] = x;
+			r.m[5] = y;
+			r.m[10] = z;
+			r.m[15] = 1.f;
 			return r;
 		}
 
@@ -80,6 +101,7 @@ namespace scop::math
 			return r;
 		}
 
+		// Vulkan depth: 0..1, flipY=true typical
 		static Mat4 perspective(float fovYRad, float aspect, float zNear, float zFar, bool flipY = true)
 		{
 			Mat4 r{};
@@ -95,6 +117,7 @@ namespace scop::math
 			return r;
 		}
 
+		// Right-handed lookAt
 		static Mat4 lookAt(const Vec3 &eye, const Vec3 &center, const Vec3 &up)
 		{
 			const Vec3 f = normalize(sub(center, eye));
@@ -103,16 +126,20 @@ namespace scop::math
 
 			Mat4 r = identity();
 
+			// col0 (s)
 			r.m[0] = s.x;
 			r.m[1] = s.y;
 			r.m[2] = s.z;
+			// col1 (u)
 			r.m[4] = u.x;
 			r.m[5] = u.y;
 			r.m[6] = u.z;
+			// col2 (-f)
 			r.m[8] = -f.x;
 			r.m[9] = -f.y;
 			r.m[10] = -f.z;
 
+			// col3 (translation)
 			r.m[12] = -dot(s, eye);
 			r.m[13] = -dot(u, eye);
 			r.m[14] = dot(f, eye);
