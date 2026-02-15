@@ -112,6 +112,15 @@ namespace scop::vk
 		bool rWasDown_ = false;
 		bool spaceWasDown_ = false;
 
+		// camera mode
+		bool orbitMode_ = false; // false = FPS, true = ORBIT
+		bool tabWasDown_ = false;
+
+		float orbitDistance_ = 4.0f;
+		float orbitTargetX_ = 0.0f;
+		float orbitTargetY_ = 0.0f;
+		float orbitTargetZ_ = 0.0f;
+
 		// wireframe toggle
 		bool f1WasDown_ = false;
 		bool wireframe_ = false;

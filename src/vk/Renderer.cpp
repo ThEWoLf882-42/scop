@@ -251,6 +251,17 @@ namespace scop::vk
 			userScale_ = 1.0f;
 		}
 
+		// Per-model defaults:
+		autoRotate_ = false;
+		paused_ = false;
+		modelTime_ = 0.0f;
+
+		// Orbit defaults (target at origin after auto-fit transform)
+		orbitTargetX_ = 0.0f;
+		orbitTargetY_ = 0.0f;
+		orbitTargetZ_ = 0.0f;
+		orbitDistance_ = 4.0f;
+
 		vkDeviceWaitIdle(ctx_.device());
 
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
@@ -318,8 +329,19 @@ namespace scop::vk
 				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
 				if (!self)
 					return;
-				self->fovDeg_ -= static_cast<float>(yoff) * 2.0f;
-				self->fovDeg_ = std::clamp(self->fovDeg_, 20.0f, 90.0f);
+
+				if (self->orbitMode_)
+				{
+					// Orbit zoom (wheel up = zoom in)
+					const float factor = (yoff > 0.0) ? 0.9f : 1.1f;
+					self->orbitDistance_ = std::clamp(self->orbitDistance_ * factor, 0.25f, 80.0f);
+				}
+				else
+				{
+					// FPS zoom = change FOV
+					self->fovDeg_ -= static_cast<float>(yoff) * 2.0f;
+					self->fovDeg_ = std::clamp(self->fovDeg_, 20.0f, 90.0f);
+				}
 			});
 
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -344,8 +366,22 @@ namespace scop::vk
 			[](GLFWwindow *win, double xpos, double ypos)
 			{
 				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
-				if (!self || !self->cursorLocked_)
+				if (!self)
 					return;
+
+				// In FPS: rotate whenever cursor is locked.
+				// In ORBIT with free cursor: rotate only while holding RMB.
+				bool rotating = self->cursorLocked_;
+				if (!rotating && self->orbitMode_)
+				{
+					rotating = (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+				}
+
+				if (!rotating)
+				{
+					self->firstMouse_ = true; // next time we start rotating, avoid jump
+					return;
+				}
 
 				if (self->firstMouse_)
 				{
@@ -564,6 +600,20 @@ namespace scop::vk
 		}
 		escWasDown_ = escDown;
 
+		// TAB toggles FPS <-> ORBIT
+		const bool tabDown = glfwGetKey(ctx_.window(), GLFW_KEY_TAB) == GLFW_PRESS;
+		if (tabDown && !tabWasDown_)
+		{
+			orbitMode_ = !orbitMode_;
+
+			// Orbit wants free cursor by default; FPS wants locked cursor by default
+			cursorLocked_ = !orbitMode_;
+			glfwSetInputMode(ctx_.window(), GLFW_CURSOR,
+							 cursorLocked_ ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+			firstMouse_ = true;
+		}
+		tabWasDown_ = tabDown;
+
 		// R resets camera
 		const bool rDown = glfwGetKey(ctx_.window(), GLFW_KEY_R) == GLFW_PRESS;
 		if (rDown && !rWasDown_)
@@ -697,41 +747,97 @@ namespace scop::vk
 		scop::math::Vec3 right = scop::math::normalize(scop::math::cross(forward, worldUp));
 		scop::math::Vec3 up = scop::math::cross(right, forward);
 
-		float speed = 2.5f;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
-			speed *= 3.0f;
+		float camx = camX_, camy = camY_, camz = camZ_;
 
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
+		if (!orbitMode_)
 		{
-			camX_ += forward.x * speed * dt;
-			camY_ += forward.y * speed * dt;
-			camZ_ += forward.z * speed * dt;
+			// ---- FPS movement (same as before) ----
+			float speed = 2.5f;
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+				speed *= 3.0f;
+
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
+			{
+				camX_ += forward.x * speed * dt;
+				camY_ += forward.y * speed * dt;
+				camZ_ += forward.z * speed * dt;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
+			{
+				camX_ -= forward.x * speed * dt;
+				camY_ -= forward.y * speed * dt;
+				camZ_ -= forward.z * speed * dt;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
+			{
+				camX_ -= right.x * speed * dt;
+				camY_ -= right.y * speed * dt;
+				camZ_ -= right.z * speed * dt;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
+			{
+				camX_ += right.x * speed * dt;
+				camY_ += right.y * speed * dt;
+				camZ_ += right.z * speed * dt;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
+			{
+				camY_ -= speed * dt;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
+			{
+				camY_ += speed * dt;
+			}
+
+			float camx = camX_, camy = camY_, camz = camZ_;
+
+			camx = camX_;
+			camy = camY_;
+			camz = camZ_;
 		}
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
+		else
 		{
-			camX_ -= forward.x * speed * dt;
-			camY_ -= forward.y * speed * dt;
-			camZ_ -= forward.z * speed * dt;
-		}
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
-		{
-			camX_ -= right.x * speed * dt;
-			camY_ -= right.y * speed * dt;
-			camZ_ -= right.z * speed * dt;
-		}
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
-		{
-			camX_ += right.x * speed * dt;
-			camY_ += right.y * speed * dt;
-			camZ_ += right.z * speed * dt;
-		}
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
-		{
-			camY_ -= speed * dt;
-		}
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
-		{
-			camY_ += speed * dt;
+			// ---- ORBIT: optional pan target with WASD/QE ----
+			const float panSpeed = 1.5f * dt * std::max(orbitDistance_, 1.0f);
+
+			// forward on XZ plane for panning
+			scop::math::Vec3 fflat{forward.x, 0.f, forward.z};
+			if (std::fabs(fflat.x) + std::fabs(fflat.z) > 0.000001f)
+				fflat = scop::math::normalize(fflat);
+
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
+			{
+				orbitTargetX_ += fflat.x * panSpeed;
+				orbitTargetZ_ += fflat.z * panSpeed;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
+			{
+				orbitTargetX_ -= fflat.x * panSpeed;
+				orbitTargetZ_ -= fflat.z * panSpeed;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
+			{
+				orbitTargetX_ -= right.x * panSpeed;
+				orbitTargetZ_ -= right.z * panSpeed;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
+			{
+				orbitTargetX_ += right.x * panSpeed;
+				orbitTargetZ_ += right.z * panSpeed;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
+			{
+				orbitTargetY_ -= panSpeed;
+			}
+			if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
+			{
+				orbitTargetY_ += panSpeed;
+			}
+
+			// camera position from orbit
+			camx = orbitTargetX_ - forward.x * orbitDistance_;
+			camy = orbitTargetY_ - forward.y * orbitDistance_;
+			camz = orbitTargetZ_ - forward.z * orbitDistance_;
 		}
 
 		// title (FPS + stats)
@@ -754,7 +860,8 @@ namespace scop::vk
 				<< " | " << (wireframe_ ? "WF" : "FILL")
 				<< " | " << (autoFit_ ? "FIT" : "RAW")
 				<< " | Scale " << appliedScale
-				<< " | BBox " << (showBounds_ ? "ON" : "OFF");
+				<< " | BBox " << (showBounds_ ? "ON" : "OFF")
+				<< " | " << (orbitMode_ ? "ORBIT" : "FPS");
 
 			if (hasModel_)
 			{
@@ -777,10 +884,22 @@ namespace scop::vk
 		const VkExtent2D ext = swap_.extent();
 		const float aspect = (ext.height == 0) ? 1.0f : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
-		const scop::math::Mat4 view = scop::math::Mat4::lookAt(
-			{camX_, camY_, camZ_},
-			{camX_ + forward.x, camY_ + forward.y, camZ_ + forward.z},
-			up);
+		scop::math::Mat4 view;
+
+		if (!orbitMode_)
+		{
+			view = scop::math::Mat4::lookAt(
+				{camx, camy, camz},
+				{camx + forward.x, camy + forward.y, camz + forward.z},
+				up);
+		}
+		else
+		{
+			view = scop::math::Mat4::lookAt(
+				{camx, camy, camz},
+				{orbitTargetX_, orbitTargetY_, orbitTargetZ_},
+				up);
+		}
 
 		const scop::math::Mat4 proj = scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 200.0f, true);
 		const scop::math::Mat4 vp = scop::math::Mat4::mul(proj, view);
@@ -810,9 +929,9 @@ namespace scop::vk
 		u.baseColor[1] = 0.85f;
 		u.baseColor[2] = 0.92f;
 		u.baseColor[3] = 0.0f;
-		u.cameraPos[0] = camX_;
-		u.cameraPos[1] = camY_;
-		u.cameraPos[2] = camZ_;
+		u.cameraPos[0] = camx;
+		u.cameraPos[1] = camy;
+		u.cameraPos[2] = camz;
 		u.cameraPos[3] = 0.0f;
 		u.spec[0] = 0.55f;
 		u.spec[1] = 64.0f;
@@ -828,4 +947,4 @@ namespace scop::vk
 		}
 	}
 
-} // namespace scop::vk
+}
