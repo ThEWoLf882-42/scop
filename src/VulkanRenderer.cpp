@@ -14,7 +14,7 @@ namespace scop
 	{
 		try
 		{
-			vk::Renderer r(900, 600, "scop - Renderer RAII");
+			vk::Renderer r(1920, 1080, "scop - Renderer RAII");
 
 			while (!r.shouldClose())
 			{
