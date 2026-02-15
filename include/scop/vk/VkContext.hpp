@@ -30,7 +30,6 @@ namespace scop::vk
 		void init(int width, int height, const char *title);
 		void destroy() noexcept;
 
-		// Getters
 		GLFWwindow *window() const { return window_; }
 		VkInstance instance() const { return instance_; }
 		VkSurfaceKHR surface() const { return surface_; }
@@ -64,4 +63,4 @@ namespace scop::vk
 		QueueFamilyIndices indices_{};
 	};
 
-} // namespace scop::vk
+}

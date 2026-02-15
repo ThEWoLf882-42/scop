@@ -42,7 +42,6 @@ namespace scop::vk
 		VkSemaphore renderFinished() const { return renderFinished_; }
 		VkFence inFlight() const { return inFlight_; }
 
-		// Pointer getters (for vkWaitForFences/vkResetFences signatures)
 		const VkFence *inFlightPtr() const { return &inFlight_; }
 		VkFence *inFlightPtr() { return &inFlight_; }
 
@@ -53,4 +52,4 @@ namespace scop::vk
 		VkFence inFlight_ = VK_NULL_HANDLE;
 	};
 
-} // namespace scop::vk
+}

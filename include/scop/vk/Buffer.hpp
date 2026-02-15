@@ -62,4 +62,4 @@ namespace scop::vk
 		uint32_t count_ = 0;
 	};
 
-} // namespace scop::vk
+}

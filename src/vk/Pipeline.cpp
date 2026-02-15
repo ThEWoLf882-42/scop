@@ -35,7 +35,7 @@ namespace
 		return mod;
 	}
 
-} // namespace
+}
 
 namespace scop::vk
 {
@@ -46,7 +46,6 @@ namespace scop::vk
 		reset();
 		device_ = device;
 
-		// Render pass
 		VkAttachmentDescription color{};
 		color.format = swapchainFormat;
 		color.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -85,7 +84,6 @@ namespace scop::vk
 		if (vkCreateRenderPass(device_, &rp, nullptr, &renderPass_) != VK_SUCCESS)
 			throw std::runtime_error("vkCreateRenderPass failed");
 
-		// Shaders
 		auto vertCode = readFile(vertSpvPath);
 		auto fragCode = readFile(fragSpvPath);
 
@@ -106,7 +104,6 @@ namespace scop::vk
 
 		VkPipelineShaderStageCreateInfo stages[] = {vertStage, fragStage};
 
-		// Vertex input
 		const auto binding = Vertex::bindingDescription();
 		const auto attrs = Vertex::attributeDescriptions();
 
@@ -202,4 +199,4 @@ namespace scop::vk
 		device_ = VK_NULL_HANDLE;
 	}
 
-} // namespace scop::vk
+}

@@ -38,4 +38,4 @@ namespace scop::vk
 		}
 	};
 
-} // namespace scop::vk
+}

@@ -57,4 +57,4 @@ namespace scop::vk
 		VkExtent2D extent_{};
 	};
 
-} // namespace scop::vk
+}

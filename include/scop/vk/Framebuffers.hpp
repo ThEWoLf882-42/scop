@@ -50,4 +50,4 @@ namespace scop::vk
 		std::vector<VkFramebuffer> fbs_;
 	};
 
-} // namespace scop::vk
+}

@@ -25,7 +25,6 @@ namespace
 	const std::vector<const char *> kRequiredDeviceExtensions = {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-	// Avoid macro issues: use strings for mac portability
 	constexpr const char *kPortabilitySubsetExtName = "VK_KHR_portability_subset";
 	constexpr const char *kPhysDevProps2ExtName = "VK_KHR_get_physical_device_properties2";
 
@@ -167,8 +166,7 @@ namespace
 		return details;
 	}
 
-} // namespace
-
+}
 namespace scop::vk
 {
 
@@ -400,4 +398,4 @@ namespace scop::vk
 		indices_ = QueueFamilyIndices{};
 	}
 
-} // namespace scop::vk
+}

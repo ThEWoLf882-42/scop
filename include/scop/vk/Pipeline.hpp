@@ -57,4 +57,4 @@ namespace scop::vk
 		VkPipeline pipeline_ = VK_NULL_HANDLE;
 	};
 
-} // namespace scop::vk
+}

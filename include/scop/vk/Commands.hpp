@@ -56,4 +56,4 @@ namespace scop::vk
 		std::vector<VkCommandBuffer> buffers_;
 	};
 
-} // namespace scop::vk
+}

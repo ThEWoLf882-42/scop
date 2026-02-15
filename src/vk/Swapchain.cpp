@@ -81,7 +81,7 @@ namespace
 		return extent;
 	}
 
-} // namespace
+}
 
 namespace scop::vk
 {
@@ -188,4 +188,4 @@ namespace scop::vk
 		extent_ = VkExtent2D{};
 	}
 
-} // namespace scop::vk
+}

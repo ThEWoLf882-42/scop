@@ -97,4 +97,4 @@ namespace scop::vk
 		device_ = VK_NULL_HANDLE;
 	}
 
-} // namespace scop::vk
+}

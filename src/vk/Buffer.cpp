@@ -98,4 +98,4 @@ namespace scop::vk
 		physicalDevice_ = VK_NULL_HANDLE;
 	}
 
-} // namespace scop::vk
+}
