@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 #include <utility>
+#include <vector>
 
 #include "scop/vk/Swapchain.hpp"
 #include "scop/vk/Commands.hpp"
@@ -13,15 +14,22 @@ namespace scop::vk
 	class FramePresenter
 	{
 	public:
+		enum class Result
+		{
+			Ok,
+			OutOfDate
+		};
+
 		FramePresenter() = default;
 
 		FramePresenter(VkDevice device,
 					   VkQueue graphicsQueue,
 					   VkQueue presentQueue,
 					   const Swapchain &swapchain,
-					   const Commands &commands)
+					   const Commands &commands,
+					   size_t framesInFlight = 2)
 		{
-			create(device, graphicsQueue, presentQueue, swapchain, commands);
+			create(device, graphicsQueue, presentQueue, swapchain, commands, framesInFlight);
 		}
 
 		~FramePresenter() noexcept { reset(); }
@@ -41,13 +49,16 @@ namespace scop::vk
 				presentQueue_ = other.presentQueue_;
 				swapchain_ = other.swapchain_;
 				commands_ = other.commands_;
-				sync_ = std::move(other.sync_);
+				frames_ = std::move(other.frames_);
+				imagesInFlight_ = std::move(other.imagesInFlight_);
+				currentFrame_ = other.currentFrame_;
 
 				other.device_ = VK_NULL_HANDLE;
 				other.graphicsQueue_ = VK_NULL_HANDLE;
 				other.presentQueue_ = VK_NULL_HANDLE;
 				other.swapchain_ = VK_NULL_HANDLE;
 				other.commands_ = nullptr;
+				other.currentFrame_ = 0;
 			}
 			return *this;
 		}
@@ -56,11 +67,14 @@ namespace scop::vk
 					VkQueue graphicsQueue,
 					VkQueue presentQueue,
 					const Swapchain &swapchain,
-					const Commands &commands);
+					const Commands &commands,
+					size_t framesInFlight = 2);
 
 		void reset() noexcept;
 
-		void draw();
+		Result acquire(uint32_t &outImageIndex);
+
+		Result submitPresent(uint32_t imageIndex);
 
 	private:
 		VkDevice device_ = VK_NULL_HANDLE;
@@ -70,7 +84,9 @@ namespace scop::vk
 		VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
 		const Commands *commands_ = nullptr;
 
-		FrameSync sync_{};
+		std::vector<FrameSync> frames_;
+		std::vector<VkFence> imagesInFlight_;
+		size_t currentFrame_ = 0;
 	};
 
 }

@@ -9,19 +9,21 @@ namespace scop::vk
 		reset();
 		device_ = device;
 
-		VkSemaphoreCreateInfo si{};
-		si.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		VkSemaphoreCreateInfo sci{};
+		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-		VkFenceCreateInfo fi{};
-		fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+		if (vkCreateSemaphore(device_, &sci, nullptr, &imageAvailable_) != VK_SUCCESS)
+			throw std::runtime_error("FrameSync: vkCreateSemaphore(imageAvailable) failed");
 
-		if (vkCreateSemaphore(device_, &si, nullptr, &imageAvailable_) != VK_SUCCESS ||
-			vkCreateSemaphore(device_, &si, nullptr, &renderFinished_) != VK_SUCCESS ||
-			vkCreateFence(device_, &fi, nullptr, &inFlight_) != VK_SUCCESS)
-		{
-			throw std::runtime_error("FrameSync::create failed");
-		}
+		if (vkCreateSemaphore(device_, &sci, nullptr, &renderFinished_) != VK_SUCCESS)
+			throw std::runtime_error("FrameSync: vkCreateSemaphore(renderFinished) failed");
+
+		VkFenceCreateInfo fci{};
+		fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+		if (vkCreateFence(device_, &fci, nullptr, &inFlight_) != VK_SUCCESS)
+			throw std::runtime_error("FrameSync: vkCreateFence failed");
 	}
 
 	void FrameSync::reset() noexcept
@@ -36,9 +38,9 @@ namespace scop::vk
 				vkDestroySemaphore(device_, imageAvailable_, nullptr);
 		}
 
-		inFlight_ = VK_NULL_HANDLE;
-		renderFinished_ = VK_NULL_HANDLE;
 		imageAvailable_ = VK_NULL_HANDLE;
+		renderFinished_ = VK_NULL_HANDLE;
+		inFlight_ = VK_NULL_HANDLE;
 		device_ = VK_NULL_HANDLE;
 	}
 

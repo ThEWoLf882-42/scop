@@ -47,10 +47,11 @@ namespace scop::vk
 			VkExtent2D extent,
 			VkPipeline pipeline,
 			VkPipelineLayout pipelineLayout,
-			VkDescriptorSet descriptorSet,
+			const std::vector<VkDescriptorSet> &descriptorSets,
 			VkBuffer vertexBuffer,
 			VkBuffer indexBuffer,
-			uint32_t indexCount);
+			uint32_t indexCount,
+			VkIndexType indexType);
 
 		const std::vector<VkCommandBuffer> &buffers() const { return buffers_; }
 

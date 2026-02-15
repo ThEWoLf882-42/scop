@@ -7,8 +7,8 @@
 
 #include "scop/math/Mat4.hpp"
 
-#include <vector>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -61,17 +61,15 @@ namespace scop::vk
 	{
 		ctx_.init(width, height, title);
 
-		swap_ = Swapchain(ctx_);
-		depth_ = DepthResources(ctx_.device(), ctx_.physicalDevice(), swap_.extent());
-
-		ubo_ = UniformBuffer(ctx_.device(), ctx_.physicalDevice(), sizeof(UBOData));
-		desc_ = Descriptors(ctx_.device(), ubo_.buffer(), sizeof(UBOData));
-
-		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
-						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
-						 desc_.layout());
-
-		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
+		glfwSetWindowUserPointer(ctx_.window(), this);
+		glfwSetFramebufferSizeCallback(
+			ctx_.window(),
+			[](GLFWwindow *win, int /*w*/, int /*h*/)
+			{
+				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
+				if (self)
+					self->framebufferResized_ = true;
+			});
 
 		const std::string objPath = "assets/models/42.obj";
 		scop::io::MeshData mesh;
@@ -93,25 +91,66 @@ namespace scop::vk
 		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.vertices);
 		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
 
-		cmds_ = Commands(ctx_.device(),
-						 ctx_.indices().graphicsFamily.value(),
-						 fbs_.size());
+		recreateSwapchain();
 
+		lastTime_ = glfwGetTime();
+	}
+
+	void Renderer::recreateSwapchain()
+	{
+		int w = 0, h = 0;
+		glfwGetFramebufferSize(ctx_.window(), &w, &h);
+		while (w == 0 || h == 0)
+		{
+			glfwWaitEvents();
+			glfwGetFramebufferSize(ctx_.window(), &w, &h);
+		}
+
+		vkDeviceWaitIdle(ctx_.device());
+
+		swap_ = Swapchain(ctx_);
+		depth_ = DepthResources(ctx_.device(), ctx_.physicalDevice(), swap_.extent());
+
+		const size_t imageCount = swap_.imageViews().size();
+
+		ubos_.clear();
+		ubos_.reserve(imageCount);
+
+		std::vector<VkBuffer> uboBuffers;
+		uboBuffers.reserve(imageCount);
+
+		for (size_t i = 0; i < imageCount; ++i)
+		{
+			ubos_.emplace_back(ctx_.device(), ctx_.physicalDevice(), sizeof(UBOData));
+			uboBuffers.push_back(ubos_.back().buffer());
+		}
+
+		desc_ = Descriptors(ctx_.device(), uboBuffers, sizeof(UBOData));
+
+		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
+						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
+						 desc_.layout());
+
+		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
+
+		cmds_ = Commands(ctx_.device(), ctx_.indices().graphicsFamily.value(), fbs_.size());
 		cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
 							pipe_.pipeline(),
 							pipe_.layout(),
-							desc_.set(),
+							desc_.sets(),
 							vb_.buffer(),
 							ib_.buffer(),
-							ib_.count());
+							ib_.count(),
+							VK_INDEX_TYPE_UINT32);
 
 		presenter_ = FramePresenter(ctx_.device(),
 									ctx_.graphicsQueue(),
 									ctx_.presentQueue(),
 									swap_,
-									cmds_);
+									cmds_,
+									2);
 
-		lastTime_ = glfwGetTime();
+		framebufferResized_ = false;
 	}
 
 	void Renderer::pollEvents() { glfwPollEvents(); }
@@ -128,6 +167,12 @@ namespace scop::vk
 
 	void Renderer::draw()
 	{
+		if (framebufferResized_)
+		{
+			recreateSwapchain();
+			return;
+		}
+
 		const double now = glfwGetTime();
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
@@ -146,8 +191,16 @@ namespace scop::vk
 		if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
 			camY_ += speed * dt;
 
+		uint32_t imageIndex = 0;
+		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
+		{
+			recreateSwapchain();
+			return;
+		}
+
 		const VkExtent2D ext = swap_.extent();
-		const float aspect = (ext.height == 0) ? 1.0f : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
+		const float aspect = (ext.height == 0) ? 1.0f
+											   : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
 		const float t = static_cast<float>(now);
 
 		const scop::math::Mat4 model =
@@ -162,9 +215,13 @@ namespace scop::vk
 
 		UBOData u{};
 		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
-		ubo_.update(&u, sizeof(u));
+		ubos_.at(imageIndex).update(&u, sizeof(u));
 
-		presenter_.draw();
+		if (presenter_.submitPresent(imageIndex) == FramePresenter::Result::OutOfDate)
+		{
+			recreateSwapchain();
+			return;
+		}
 	}
 
 }

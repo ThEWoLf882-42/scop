@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "scop/vk/VkContext.hpp"
 #include "scop/vk/Swapchain.hpp"
 #include "scop/vk/Depth.hpp"
@@ -38,11 +40,13 @@ namespace scop::vk
 		void draw();
 
 	private:
+		void recreateSwapchain();
+
 		VkContext ctx_{};
 		Swapchain swap_{};
 		DepthResources depth_{};
 
-		UniformBuffer ubo_{};
+		std::vector<UniformBuffer> ubos_;
 		Descriptors desc_{};
 
 		Pipeline pipe_{};
@@ -58,6 +62,8 @@ namespace scop::vk
 		float camY_ = 0.0f;
 		float camZ_ = 2.5f;
 		double lastTime_ = 0.0;
+
+		bool framebufferResized_ = false;
 	};
 
 }

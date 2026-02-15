@@ -9,9 +9,13 @@ namespace scop::vk
 								VkQueue graphicsQueue,
 								VkQueue presentQueue,
 								const Swapchain &swapchain,
-								const Commands &commands)
+								const Commands &commands,
+								size_t framesInFlight)
 	{
 		reset();
+
+		if (framesInFlight == 0)
+			throw std::runtime_error("FramePresenter: framesInFlight must be > 0");
 
 		device_ = device;
 		graphicsQueue_ = graphicsQueue;
@@ -19,7 +23,12 @@ namespace scop::vk
 		swapchain_ = swapchain.handle();
 		commands_ = &commands;
 
-		sync_.create(device_);
+		frames_.resize(framesInFlight);
+		for (auto &f : frames_)
+			f.create(device_);
+
+		imagesInFlight_.assign(commands_->buffers().size(), VK_NULL_HANDLE);
+		currentFrame_ = 0;
 	}
 
 	void FramePresenter::reset() noexcept
@@ -29,41 +38,68 @@ namespace scop::vk
 			(void)vkDeviceWaitIdle(device_);
 		}
 
-		sync_.reset();
+		for (auto &f : frames_)
+			f.reset();
+		frames_.clear();
+		imagesInFlight_.clear();
 
 		device_ = VK_NULL_HANDLE;
 		graphicsQueue_ = VK_NULL_HANDLE;
 		presentQueue_ = VK_NULL_HANDLE;
 		swapchain_ = VK_NULL_HANDLE;
 		commands_ = nullptr;
+		currentFrame_ = 0;
 	}
 
-	void FramePresenter::draw()
+	FramePresenter::Result FramePresenter::acquire(uint32_t &outImageIndex)
 	{
 		if (!commands_)
-			throw std::runtime_error("FramePresenter::draw: presenter not created");
+			throw std::runtime_error("FramePresenter::acquire: not created");
 
-		vkWaitForFences(device_, 1, sync_.inFlightPtr(), VK_TRUE, UINT64_MAX);
-		vkResetFences(device_, 1, sync_.inFlightPtr());
+		FrameSync &sync = frames_[currentFrame_];
 
-		uint32_t imageIndex = 0;
+		vkWaitForFences(device_, 1, sync.inFlightPtr(), VK_TRUE, UINT64_MAX);
+
 		VkResult res = vkAcquireNextImageKHR(
 			device_, swapchain_, UINT64_MAX,
-			sync_.imageAvailable(), VK_NULL_HANDLE,
-			&imageIndex);
+			sync.imageAvailable(), VK_NULL_HANDLE,
+			&outImageIndex);
+
+		if (res == VK_ERROR_OUT_OF_DATE_KHR)
+			return Result::OutOfDate;
 
 		if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
-		{
 			throw std::runtime_error("vkAcquireNextImageKHR failed");
+
+		if (outImageIndex >= imagesInFlight_.size())
+			throw std::runtime_error("FramePresenter: acquired imageIndex out of range");
+
+		if (imagesInFlight_[outImageIndex] != VK_NULL_HANDLE)
+		{
+			vkWaitForFences(device_, 1, &imagesInFlight_[outImageIndex], VK_TRUE, UINT64_MAX);
 		}
 
-		VkSemaphore waitSems[] = {sync_.imageAvailable()};
-		VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-		VkSemaphore signalSems[] = {sync_.renderFinished()};
+		imagesInFlight_[outImageIndex] = sync.inFlight();
+
+		vkResetFences(device_, 1, sync.inFlightPtr());
+
+		return Result::Ok;
+	}
+
+	FramePresenter::Result FramePresenter::submitPresent(uint32_t imageIndex)
+	{
+		if (!commands_)
+			throw std::runtime_error("FramePresenter::submitPresent: not created");
+
+		FrameSync &sync = frames_[currentFrame_];
 
 		const auto &bufs = commands_->buffers();
 		if (imageIndex >= bufs.size())
-			throw std::runtime_error("FramePresenter: imageIndex out of range (command buffers)");
+			throw std::runtime_error("FramePresenter: imageIndex out of range (cmd buffers)");
+
+		VkSemaphore waitSems[] = {sync.imageAvailable()};
+		VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+		VkSemaphore signalSems[] = {sync.renderFinished()};
 
 		VkSubmitInfo submit{};
 		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -75,7 +111,7 @@ namespace scop::vk
 		submit.signalSemaphoreCount = 1;
 		submit.pSignalSemaphores = signalSems;
 
-		if (vkQueueSubmit(graphicsQueue_, 1, &submit, sync_.inFlight()) != VK_SUCCESS)
+		if (vkQueueSubmit(graphicsQueue_, 1, &submit, sync.inFlight()) != VK_SUCCESS)
 			throw std::runtime_error("vkQueueSubmit failed");
 
 		VkPresentInfoKHR present{};
@@ -86,11 +122,17 @@ namespace scop::vk
 		present.pSwapchains = &swapchain_;
 		present.pImageIndices = &imageIndex;
 
-		res = vkQueuePresentKHR(presentQueue_, &present);
-		if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
-		{
+		VkResult pres = vkQueuePresentKHR(presentQueue_, &present);
+
+		currentFrame_ = (currentFrame_ + 1) % frames_.size();
+
+		if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR)
+			return Result::OutOfDate;
+
+		if (pres != VK_SUCCESS)
 			throw std::runtime_error("vkQueuePresentKHR failed");
-		}
+
+		return Result::Ok;
 	}
 
 }

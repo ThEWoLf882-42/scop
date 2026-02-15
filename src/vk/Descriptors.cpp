@@ -4,10 +4,15 @@
 namespace scop::vk
 {
 
-	void Descriptors::create(VkDevice device, VkBuffer uniformBuffer, VkDeviceSize range)
+	void Descriptors::create(VkDevice device,
+							 const std::vector<VkBuffer> &uniformBuffers,
+							 VkDeviceSize range)
 	{
 		reset();
 		device_ = device;
+
+		if (uniformBuffers.empty())
+			throw std::runtime_error("Descriptors: uniformBuffers empty");
 
 		VkDescriptorSetLayoutBinding ubo{};
 		ubo.binding = 0;
@@ -25,41 +30,48 @@ namespace scop::vk
 
 		VkDescriptorPoolSize ps{};
 		ps.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		ps.descriptorCount = 1;
+		ps.descriptorCount = static_cast<uint32_t>(uniformBuffers.size());
 
 		VkDescriptorPoolCreateInfo pci{};
 		pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		pci.maxSets = 1;
+		pci.maxSets = static_cast<uint32_t>(uniformBuffers.size());
 		pci.poolSizeCount = 1;
 		pci.pPoolSizes = &ps;
 
 		if (vkCreateDescriptorPool(device_, &pci, nullptr, &pool_) != VK_SUCCESS)
 			throw std::runtime_error("Descriptors: vkCreateDescriptorPool failed");
 
+		std::vector<VkDescriptorSetLayout> layouts(uniformBuffers.size(), setLayout_);
+
 		VkDescriptorSetAllocateInfo ai{};
 		ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		ai.descriptorPool = pool_;
-		ai.descriptorSetCount = 1;
-		ai.pSetLayouts = &setLayout_;
+		ai.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+		ai.pSetLayouts = layouts.data();
 
-		if (vkAllocateDescriptorSets(device_, &ai, &set_) != VK_SUCCESS)
+		sets_.resize(uniformBuffers.size());
+		if (vkAllocateDescriptorSets(device_, &ai, sets_.data()) != VK_SUCCESS)
 			throw std::runtime_error("Descriptors: vkAllocateDescriptorSets failed");
 
-		VkDescriptorBufferInfo bi{};
-		bi.buffer = uniformBuffer;
-		bi.offset = 0;
-		bi.range = range;
+		std::vector<VkDescriptorBufferInfo> infos(uniformBuffers.size());
+		std::vector<VkWriteDescriptorSet> writes(uniformBuffers.size());
 
-		VkWriteDescriptorSet write{};
-		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		write.dstSet = set_;
-		write.dstBinding = 0;
-		write.dstArrayElement = 0;
-		write.descriptorCount = 1;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		write.pBufferInfo = &bi;
+		for (size_t i = 0; i < uniformBuffers.size(); ++i)
+		{
+			infos[i].buffer = uniformBuffers[i];
+			infos[i].offset = 0;
+			infos[i].range = range;
 
-		vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+			writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writes[i].dstSet = sets_[i];
+			writes[i].dstBinding = 0;
+			writes[i].dstArrayElement = 0;
+			writes[i].descriptorCount = 1;
+			writes[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writes[i].pBufferInfo = &infos[i];
+		}
+
+		vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 	}
 
 	void Descriptors::reset() noexcept
@@ -74,7 +86,7 @@ namespace scop::vk
 		device_ = VK_NULL_HANDLE;
 		pool_ = VK_NULL_HANDLE;
 		setLayout_ = VK_NULL_HANDLE;
-		set_ = VK_NULL_HANDLE;
+		sets_.clear();
 	}
 
 }

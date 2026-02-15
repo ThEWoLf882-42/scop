@@ -11,6 +11,7 @@ namespace scop::vk
 	public:
 		FrameSync() = default;
 		explicit FrameSync(VkDevice device) { create(device); }
+
 		~FrameSync() noexcept { reset(); }
 
 		FrameSync(const FrameSync &) = delete;
@@ -40,10 +41,10 @@ namespace scop::vk
 
 		VkSemaphore imageAvailable() const { return imageAvailable_; }
 		VkSemaphore renderFinished() const { return renderFinished_; }
-		VkFence inFlight() const { return inFlight_; }
 
-		const VkFence *inFlightPtr() const { return &inFlight_; }
+		VkFence inFlight() const { return inFlight_; }
 		VkFence *inFlightPtr() { return &inFlight_; }
+		const VkFence *inFlightPtr() const { return &inFlight_; }
 
 	private:
 		VkDevice device_ = VK_NULL_HANDLE;

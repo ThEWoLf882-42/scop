@@ -35,13 +35,16 @@ namespace scop::vk
 		VkExtent2D extent,
 		VkPipeline pipeline,
 		VkPipelineLayout pipelineLayout,
-		VkDescriptorSet descriptorSet,
+		const std::vector<VkDescriptorSet> &descriptorSets,
 		VkBuffer vertexBuffer,
 		VkBuffer indexBuffer,
-		uint32_t indexCount)
+		uint32_t indexCount,
+		VkIndexType indexType)
 	{
 		if (buffers_.size() != framebuffers.size())
 			throw std::runtime_error("Commands: buffers count != framebuffers count");
+		if (descriptorSets.size() != framebuffers.size())
+			throw std::runtime_error("Commands: descriptorSets count != framebuffers count");
 
 		for (size_t i = 0; i < buffers_.size(); ++i)
 		{
@@ -73,14 +76,14 @@ namespace scop::vk
 				cmd,
 				VK_PIPELINE_BIND_POINT_GRAPHICS,
 				pipelineLayout,
-				0, 1, &descriptorSet,
+				0, 1, &descriptorSets[i],
 				0, nullptr);
 
 			VkBuffer vbufs[] = {vertexBuffer};
 			VkDeviceSize offs[] = {0};
 			vkCmdBindVertexBuffers(cmd, 0, 1, vbufs, offs);
 
-			vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdBindIndexBuffer(cmd, indexBuffer, 0, indexType);
 			vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
 
 			vkCmdEndRenderPass(cmd);
