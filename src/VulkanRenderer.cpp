@@ -9,7 +9,6 @@
 
 namespace scop
 {
-
 	void VulkanRenderer::run()
 	{
 		try
@@ -20,9 +19,12 @@ namespace scop
 			{
 				r.pollEvents();
 				r.draw();
-
-				if (glfwGetKey(r.window(), GLFW_KEY_ESCAPE) == GLFW_PRESS)
+				if (glfwGetKey(r.window(), GLFW_KEY_Q) == GLFW_PRESS &&
+					(glfwGetKey(r.window(), GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+					 glfwGetKey(r.window(), GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS))
+				{
 					r.requestClose();
+				}
 			}
 		}
 		catch (const std::exception &e)
@@ -30,5 +32,4 @@ namespace scop
 			std::cerr << "Fatal: " << e.what() << "\n";
 		}
 	}
-
 }

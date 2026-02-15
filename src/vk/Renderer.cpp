@@ -289,6 +289,17 @@ namespace scop::vk
 		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		cursorLocked_ = true;
 
+		glfwSetWindowFocusCallback(ctx_.window(), [](GLFWwindow *win, int focused)
+								   {
+				auto* self = static_cast<Renderer*>(glfwGetWindowUserPointer(win));
+				if (!self) return;
+			
+				if (focused == GLFW_FALSE) {
+					self->cursorLocked_ = false;
+					glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+					self->firstMouse_ = true;
+				} });
+
 		glfwSetCursorPosCallback(
 			ctx_.window(),
 			[](GLFWwindow *win, double xpos, double ypos)
