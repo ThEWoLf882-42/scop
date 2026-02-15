@@ -1,6 +1,5 @@
 #pragma once
 
-#include <utility>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -11,49 +10,33 @@ namespace scop::vk
 	{
 	public:
 		Commands() = default;
-
-		Commands(VkDevice device, uint32_t graphicsQueueFamilyIndex, size_t bufferCount)
-		{
-			create(device, graphicsQueueFamilyIndex, bufferCount);
-		}
-
+		Commands(VkDevice device, uint32_t queueFamilyIndex, size_t count) { create(device, queueFamilyIndex, count); }
 		~Commands() noexcept { reset(); }
 
 		Commands(const Commands &) = delete;
 		Commands &operator=(const Commands &) = delete;
 
 		Commands(Commands &&other) noexcept { *this = std::move(other); }
-		Commands &operator=(Commands &&other) noexcept
-		{
-			if (this != &other)
-			{
-				reset();
-				device_ = other.device_;
-				pool_ = other.pool_;
-				buffers_ = std::move(other.buffers_);
+		Commands &operator=(Commands &&other) noexcept;
 
-				other.device_ = VK_NULL_HANDLE;
-				other.pool_ = VK_NULL_HANDLE;
-			}
-			return *this;
-		}
-
-		void create(VkDevice device, uint32_t graphicsQueueFamilyIndex, size_t bufferCount);
+		void create(VkDevice device, uint32_t queueFamilyIndex, size_t count);
 		void reset() noexcept;
 
-		void recordIndexed(
-			VkRenderPass renderPass,
-			const std::vector<VkFramebuffer> &framebuffers,
-			VkExtent2D extent,
-			VkPipeline pipeline,
-			VkPipelineLayout pipelineLayout,
-			const std::vector<VkDescriptorSet> &descriptorSets,
-			VkBuffer vertexBuffer,
-			VkBuffer indexBuffer,
-			uint32_t indexCount,
-			VkIndexType indexType);
-
 		const std::vector<VkCommandBuffer> &buffers() const { return buffers_; }
+
+		void recordScene(VkRenderPass renderPass,
+						 const std::vector<VkFramebuffer> &framebuffers,
+						 VkExtent2D extent,
+						 VkPipeline modelPipeline,
+						 VkPipelineLayout layout,
+						 const std::vector<VkDescriptorSet> &sets,
+						 VkBuffer modelVB,
+						 VkBuffer modelIB,
+						 uint32_t indexCount,
+						 VkIndexType indexType,
+						 VkPipeline linesPipeline,
+						 VkBuffer linesVB,
+						 uint32_t linesVertexCount);
 
 	private:
 		VkDevice device_ = VK_NULL_HANDLE;

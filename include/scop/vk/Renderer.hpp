@@ -6,6 +6,7 @@
 #include "scop/vk/Swapchain.hpp"
 #include "scop/vk/Depth.hpp"
 #include "scop/vk/Pipeline.hpp"
+#include "scop/vk/PipelineVariant.hpp"
 #include "scop/vk/Framebuffers.hpp"
 #include "scop/vk/Commands.hpp"
 #include "scop/vk/Buffer.hpp"
@@ -49,22 +50,28 @@ namespace scop::vk
 		std::vector<UniformBuffer> ubos_;
 		Descriptors desc_{};
 
-		Pipeline pipe_{};
+		// pipelines
+		Pipeline modelPipe_{};
+		PipelineVariant linesPipe_{};
+
 		Framebuffers fbs_{};
 
+		// geometry
 		VertexBuffer vb_{};
 		IndexBuffer ib_{};
+
+		VertexBuffer linesVB_{};
+		uint32_t linesVertexCount_ = 0;
 
 		Commands cmds_{};
 		FramePresenter presenter_{};
 
+		// camera
 		float camX_ = 0.0f;
 		float camY_ = 0.0f;
 		float camZ_ = 2.5f;
-
 		float yawDeg_ = -90.0f;
 		float pitchDeg_ = 0.0f;
-
 		float fovDeg_ = 55.0f;
 
 		bool firstMouse_ = true;
@@ -76,6 +83,7 @@ namespace scop::vk
 		bool rWasDown_ = false;
 		bool spaceWasDown_ = false;
 
+		// wireframe toggle (model only)
 		bool f1WasDown_ = false;
 		bool wireframe_ = false;
 		bool warnedNoWire_ = false;
@@ -83,6 +91,7 @@ namespace scop::vk
 		bool paused_ = false;
 		float modelTime_ = 0.0f;
 
+		// FPS overlay
 		double lastTime_ = 0.0;
 		double fpsAccum_ = 0.0;
 		int fpsFrames_ = 0;

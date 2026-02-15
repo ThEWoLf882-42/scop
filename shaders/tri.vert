@@ -7,7 +7,7 @@ layout(location = 0) out vec3 vNormalW;
 layout(location = 1) out vec3 vPosW;
 
 layout(set = 0, binding = 0) uniform UBO {
-    mat4 mvp;
+    mat4 vp;
     mat4 model;
     vec4 lightDir;
     vec4 baseColor;
@@ -18,9 +18,6 @@ layout(set = 0, binding = 0) uniform UBO {
 void main() {
     vec4 posW = ubo.model * vec4(inPos, 1.0);
     vPosW = posW.xyz;
-
-    // OK for our model (rotation/translation). If you later add scaling, use normal matrix.
     vNormalW = normalize(mat3(ubo.model) * inNormal);
-
-    gl_Position = ubo.mvp * vec4(inPos, 1.0);
+    gl_Position = ubo.vp * posW;
 }

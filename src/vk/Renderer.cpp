@@ -18,13 +18,15 @@ namespace
 
 	struct alignas(16) UBOData
 	{
-		scop::math::Mat4 mvp;
-		scop::math::Mat4 model;
+		scop::math::Mat4 vp;	// proj * view
+		scop::math::Mat4 model; // model transform
 		float lightDir[4];
 		float baseColor[4];
 		float cameraPos[4];
 		float spec[4];
 	};
+
+	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
 
 	scop::io::MeshData makeCube()
 	{
@@ -75,7 +77,49 @@ namespace
 		return m;
 	}
 
-	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
+	// Vertex.normal is used as COLOR for lines
+	std::vector<scop::vk::Vertex> makeGridAxes(int half = 10, float step = 1.0f)
+	{
+		using scop::vk::Vertex;
+		std::vector<Vertex> out;
+		out.reserve(static_cast<size_t>((half * 2 + 1) * 4 + 6) * 2);
+
+		auto pushLine = [&](float x1, float y1, float z1,
+							float x2, float y2, float z2,
+							float r, float g, float b)
+		{
+			Vertex a{{x1, y1, z1}, {r, g, b}};
+			Vertex c{{x2, y2, z2}, {r, g, b}};
+			out.push_back(a);
+			out.push_back(c);
+		};
+
+		const float y = 0.0f;
+		const float size = static_cast<float>(half) * step;
+
+		// grid (XZ)
+		for (int i = -half; i <= half; ++i)
+		{
+			float p = static_cast<float>(i) * step;
+
+			// darker center lines
+			const bool center = (i == 0);
+			const float k = center ? 0.35f : 0.18f;
+
+			// line along X at Z = p
+			pushLine(-size, y, p, size, y, p, k, k, k);
+			// line along Z at X = p
+			pushLine(p, y, -size, p, y, size, k, k, k);
+		}
+
+		// axes
+		const float ax = size * 1.15f;
+		pushLine(0, 0, 0, ax, 0, 0, 1.f, 0.f, 0.f); // X red
+		pushLine(0, 0, 0, 0, ax, 0, 0.f, 1.f, 0.f); // Y green
+		pushLine(0, 0, 0, 0, 0, ax, 0.f, 0.f, 1.f); // Z blue
+
+		return out;
+	}
 
 } // namespace
 
@@ -143,7 +187,8 @@ namespace scop::vk
 				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
 			});
 
-		const std::string objPath = "assets/models/42.obj";
+		// ---- Load mesh ----
+		const std::string objPath = "assets/model.obj";
 		scop::io::MeshData mesh;
 
 		try
@@ -159,9 +204,14 @@ namespace scop::vk
 			mesh = makeCube();
 		}
 
+		// ---- Build grid/axes ----
+		const auto lines = makeGridAxes(10, 1.0f);
+		linesVertexCount_ = static_cast<uint32_t>(lines.size());
+
 		Uploader uploader(ctx_.device(), ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue());
 		vb_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.vertices);
 		ib_ = IndexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, mesh.indices);
+		linesVB_ = VertexBuffer(ctx_.device(), ctx_.physicalDevice(), uploader, lines);
 
 		recreateSwapchain();
 
@@ -202,26 +252,44 @@ namespace scop::vk
 
 		desc_ = Descriptors(ctx_.device(), uboBuffers, sizeof(UBOData));
 
-		// IMPORTANT: pipeline mode must match current wireframe state
 		VkPolygonMode mode = VK_POLYGON_MODE_FILL;
 		if (wireframe_ && ctx_.wireframeSupported())
 			mode = VK_POLYGON_MODE_LINE;
 
-		pipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
-						 "shaders/tri.vert.spv", "shaders/tri.frag.spv",
-						 desc_.layout(), mode);
+		// main pipeline (owns renderpass + layout)
+		modelPipe_ = Pipeline(ctx_.device(), swap_.imageFormat(), depth_.format(), swap_.extent(),
+							  "shaders/tri.vert.spv", "shaders/tri.frag.spv",
+							  desc_.layout(), mode);
 
-		fbs_ = Framebuffers(ctx_.device(), pipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
+		fbs_ = Framebuffers(ctx_.device(), modelPipe_.renderPass(), swap_.imageViews(), depth_.view(), swap_.extent());
+
+		// line pipeline variant (shares renderpass + layout)
+		linesPipe_ = PipelineVariant(ctx_.device(),
+									 modelPipe_.renderPass(),
+									 modelPipe_.layout(),
+									 depth_.format(),
+									 swap_.extent(),
+									 "shaders/lines.vert.spv",
+									 "shaders/lines.frag.spv",
+									 VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+									 false, // depth write OFF
+									 VK_CULL_MODE_NONE);
 
 		cmds_ = Commands(ctx_.device(), ctx_.indices().graphicsFamily.value(), fbs_.size());
-		cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
-							pipe_.pipeline(),
-							pipe_.layout(),
-							desc_.sets(),
-							vb_.buffer(),
-							ib_.buffer(),
-							ib_.count(),
-							VK_INDEX_TYPE_UINT32);
+
+		cmds_.recordScene(modelPipe_.renderPass(),
+						  fbs_.get(),
+						  swap_.extent(),
+						  modelPipe_.pipeline(),
+						  modelPipe_.layout(),
+						  desc_.sets(),
+						  vb_.buffer(),
+						  ib_.buffer(),
+						  ib_.count(),
+						  VK_INDEX_TYPE_UINT32,
+						  linesPipe_.pipeline(),
+						  linesVB_.buffer(),
+						  linesVertexCount_);
 
 		presenter_ = FramePresenter(ctx_.device(),
 									ctx_.graphicsQueue(),
@@ -257,7 +325,7 @@ namespace scop::vk
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
-		// FPS title (and show WF/FILL)
+		// FPS title + mode
 		fpsAccum_ += dt;
 		fpsFrames_ += 1;
 		if (fpsAccum_ >= 0.5)
@@ -307,7 +375,7 @@ namespace scop::vk
 			paused_ = !paused_;
 		spaceWasDown_ = spDown;
 
-		// F1 toggles wireframe (rebuild pipeline + re-record commands)
+		// F1 toggles model wireframe (rebuild + re-record)
 		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
 		if (f1Down && !f1WasDown_)
 		{
@@ -325,18 +393,22 @@ namespace scop::vk
 
 				vkDeviceWaitIdle(ctx_.device());
 
-				pipe_.recreate(
-					swap_.extent(),
-					wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
+				modelPipe_.recreate(swap_.extent(), wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL);
 
-				cmds_.recordIndexed(pipe_.renderPass(), fbs_.get(), swap_.extent(),
-									pipe_.pipeline(),
-									pipe_.layout(),
-									desc_.sets(),
-									vb_.buffer(),
-									ib_.buffer(),
-									ib_.count(),
-									VK_INDEX_TYPE_UINT32);
+				// re-record (model pipeline handle changed)
+				cmds_.recordScene(modelPipe_.renderPass(),
+								  fbs_.get(),
+								  swap_.extent(),
+								  modelPipe_.pipeline(),
+								  modelPipe_.layout(),
+								  desc_.sets(),
+								  vb_.buffer(),
+								  ib_.buffer(),
+								  ib_.count(),
+								  VK_INDEX_TYPE_UINT32,
+								  linesPipe_.pipeline(),
+								  linesVB_.buffer(),
+								  linesVertexCount_);
 			}
 		}
 		f1WasDown_ = f1Down;
@@ -344,7 +416,7 @@ namespace scop::vk
 		if (!paused_)
 			modelTime_ += dt;
 
-		// camera vectors from yaw/pitch
+		// camera forward/right/up
 		const float yaw = degToRad(yawDeg_);
 		const float pitch = degToRad(pitchDeg_);
 
@@ -395,7 +467,7 @@ namespace scop::vk
 			camY_ += speed * dt;
 		}
 
-		// acquire
+		// acquire image
 		uint32_t imageIndex = 0;
 		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
 		{
@@ -407,21 +479,20 @@ namespace scop::vk
 		const float aspect = (ext.height == 0) ? 1.0f
 											   : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
 
-		const float t = modelTime_;
-
 		const scop::math::Mat4 model =
-			scop::math::Mat4::mul(scop::math::Mat4::rotationY(t),
-								  scop::math::Mat4::rotationX(t * 0.7f));
+			scop::math::Mat4::mul(scop::math::Mat4::rotationY(modelTime_),
+								  scop::math::Mat4::rotationX(modelTime_ * 0.7f));
 
 		const scop::math::Vec3 eye{camX_, camY_, camZ_};
 		const scop::math::Vec3 center{camX_ + forward.x, camY_ + forward.y, camZ_ + forward.z};
 
 		const scop::math::Mat4 view = scop::math::Mat4::lookAt(eye, center, up);
 		const scop::math::Mat4 proj = scop::math::Mat4::perspective(degToRad(fovDeg_), aspect, 0.1f, 80.0f, true);
+		const scop::math::Mat4 vp = scop::math::Mat4::mul(proj, view);
 
 		UBOData u{};
+		u.vp = vp;
 		u.model = model;
-		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
 
 		u.lightDir[0] = 0.6f;
 		u.lightDir[1] = -1.0f;
@@ -449,4 +520,4 @@ namespace scop::vk
 		}
 	}
 
-} // namespace scop::vk
+}
