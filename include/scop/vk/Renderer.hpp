@@ -61,6 +61,14 @@ namespace scop::vk
 		float camX_ = 0.0f;
 		float camY_ = 0.0f;
 		float camZ_ = 2.5f;
+
+		float yawDeg_ = -90.0f;
+		float pitchDeg_ = 0.0f;
+
+		bool firstMouse_ = true;
+		double lastMouseX_ = 0.0;
+		double lastMouseY_ = 0.0;
+
 		double lastTime_ = 0.0;
 
 		bool framebufferResized_ = false;

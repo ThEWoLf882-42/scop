@@ -7,8 +7,10 @@
 
 #include "scop/math/Mat4.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <vector>
+#include <cmath>
 
 namespace
 {
@@ -17,10 +19,13 @@ namespace
 	{
 		scop::math::Mat4 mvp;
 		scop::math::Mat4 model;
-		float lightDir[4];
-		float baseColor[4];
+		float lightDir[4];	// xyz + padding
+		float baseColor[4]; // rgb + padding
+		float cameraPos[4]; // xyz + padding
+		float spec[4];		// x=specStrength, y=shininess
 	};
 
+	// Proper flat-shaded cube fallback: 24 verts (4 per face), 36 indices
 	scop::io::MeshData makeCube()
 	{
 		using scop::vk::Vertex;
@@ -44,11 +49,17 @@ namespace
 			v.push_back(D);
 		};
 
+		// +Z
 		pushFace(0, 0, 1, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f);
+		// -Z
 		pushFace(0, 0, -1, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f);
+		// +X
 		pushFace(1, 0, 0, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 0.5f);
+		// -X
 		pushFace(-1, 0, 0, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f, -0.5f);
+		// +Y
 		pushFace(0, 1, 0, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, -0.5f);
+		// -Y
 		pushFace(0, -1, 0, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, -0.5f, -0.5f, 0.5f);
 
 		std::vector<uint32_t> idx;
@@ -70,7 +81,9 @@ namespace
 		return m;
 	}
 
-}
+	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
+
+} // namespace
 
 namespace scop::vk
 {
@@ -85,6 +98,8 @@ namespace scop::vk
 		ctx_.init(width, height, title);
 
 		glfwSetWindowUserPointer(ctx_.window(), this);
+
+		// resize callback
 		glfwSetFramebufferSizeCallback(
 			ctx_.window(),
 			[](GLFWwindow *win, int /*w*/, int /*h*/)
@@ -94,7 +109,38 @@ namespace scop::vk
 					self->framebufferResized_ = true;
 			});
 
-		const std::string objPath = "assets/models/42.obj";
+		// mouse look
+		glfwSetInputMode(ctx_.window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		glfwSetCursorPosCallback(
+			ctx_.window(),
+			[](GLFWwindow *win, double xpos, double ypos)
+			{
+				auto *self = static_cast<Renderer *>(glfwGetWindowUserPointer(win));
+				if (!self)
+					return;
+
+				if (self->firstMouse_)
+				{
+					self->firstMouse_ = false;
+					self->lastMouseX_ = xpos;
+					self->lastMouseY_ = ypos;
+					return;
+				}
+
+				const double dx = xpos - self->lastMouseX_;
+				const double dy = ypos - self->lastMouseY_;
+				self->lastMouseX_ = xpos;
+				self->lastMouseY_ = ypos;
+
+				const float sens = 0.12f;
+				self->yawDeg_ += static_cast<float>(dx) * sens;
+				self->pitchDeg_ -= static_cast<float>(dy) * sens;
+
+				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
+			});
+
+		// ---- Load mesh (once) ----
+		const std::string objPath = "assets/model.obj";
 		scop::io::MeshData mesh;
 
 		try
@@ -199,20 +245,56 @@ namespace scop::vk
 		const float dt = static_cast<float>(now - lastTime_);
 		lastTime_ = now;
 
-		const float speed = 2.0f;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
-			camZ_ -= speed * dt;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
-			camZ_ += speed * dt;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
-			camX_ -= speed * dt;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
-			camX_ += speed * dt;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
-			camY_ -= speed * dt;
-		if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
-			camY_ += speed * dt;
+		// build camera vectors from yaw/pitch
+		const float yaw = degToRad(yawDeg_);
+		const float pitch = degToRad(pitchDeg_);
 
+		scop::math::Vec3 forward{
+			std::cos(pitch) * std::cos(yaw),
+			std::sin(pitch),
+			std::cos(pitch) * std::sin(yaw)};
+		forward = scop::math::normalize(forward);
+
+		const scop::math::Vec3 worldUp{0.f, 1.f, 0.f};
+		scop::math::Vec3 right = scop::math::normalize(scop::math::cross(forward, worldUp));
+		scop::math::Vec3 up = scop::math::cross(right, forward);
+
+		// movement (WASD: forward/strafe, Q/E: down/up)
+		const float speed = 2.5f;
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_W) == GLFW_PRESS)
+		{
+			camX_ += forward.x * speed * dt;
+			camY_ += forward.y * speed * dt;
+			camZ_ += forward.z * speed * dt;
+		}
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_S) == GLFW_PRESS)
+		{
+			camX_ -= forward.x * speed * dt;
+			camY_ -= forward.y * speed * dt;
+			camZ_ -= forward.z * speed * dt;
+		}
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_A) == GLFW_PRESS)
+		{
+			camX_ -= right.x * speed * dt;
+			camY_ -= right.y * speed * dt;
+			camZ_ -= right.z * speed * dt;
+		}
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_D) == GLFW_PRESS)
+		{
+			camX_ += right.x * speed * dt;
+			camY_ += right.y * speed * dt;
+			camZ_ += right.z * speed * dt;
+		}
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_Q) == GLFW_PRESS)
+		{
+			camY_ -= speed * dt;
+		}
+		if (glfwGetKey(ctx_.window(), GLFW_KEY_E) == GLFW_PRESS)
+		{
+			camY_ += speed * dt;
+		}
+
+		// acquire image
 		uint32_t imageIndex = 0;
 		if (presenter_.acquire(imageIndex) == FramePresenter::Result::OutOfDate)
 		{
@@ -223,31 +305,48 @@ namespace scop::vk
 		const VkExtent2D ext = swap_.extent();
 		const float aspect = (ext.height == 0) ? 1.0f
 											   : (static_cast<float>(ext.width) / static_cast<float>(ext.height));
+
 		const float t = static_cast<float>(now);
 
 		const scop::math::Mat4 model =
 			scop::math::Mat4::mul(scop::math::Mat4::rotationY(t),
 								  scop::math::Mat4::rotationX(t * 0.7f));
 
-		const scop::math::Mat4 view =
-			scop::math::Mat4::translation(-camX_, -camY_, -camZ_);
+		const scop::math::Vec3 eye{camX_, camY_, camZ_};
+		const scop::math::Vec3 center{camX_ + forward.x, camY_ + forward.y, camZ_ + forward.z};
+
+		const scop::math::Mat4 view = scop::math::Mat4::lookAt(eye, center, up);
 
 		const scop::math::Mat4 proj =
-			scop::math::Mat4::perspective(45.0f * 3.14159265f / 180.0f, aspect, 0.1f, 50.0f, true);
+			scop::math::Mat4::perspective(55.0f * 3.14159265f / 180.0f, aspect, 0.1f, 80.0f, true);
 
 		UBOData u{};
 		u.model = model;
 		u.mvp = scop::math::Mat4::mul(proj, scop::math::Mat4::mul(view, model));
 
+		// light direction (world space)
 		u.lightDir[0] = 0.6f;
 		u.lightDir[1] = -1.0f;
 		u.lightDir[2] = 0.4f;
 		u.lightDir[3] = 0.0f;
 
-		u.baseColor[0] = 0.85f;
+		// base color
+		u.baseColor[0] = 0.82f;
 		u.baseColor[1] = 0.85f;
-		u.baseColor[2] = 0.90f;
+		u.baseColor[2] = 0.92f;
 		u.baseColor[3] = 0.0f;
+
+		// camera position for specular
+		u.cameraPos[0] = camX_;
+		u.cameraPos[1] = camY_;
+		u.cameraPos[2] = camZ_;
+		u.cameraPos[3] = 0.0f;
+
+		// specular
+		u.spec[0] = 0.55f; // strength
+		u.spec[1] = 64.0f; // shininess
+		u.spec[2] = 0.0f;
+		u.spec[3] = 0.0f;
 
 		ubos_.at(imageIndex).update(&u, sizeof(u));
 
@@ -258,4 +357,4 @@ namespace scop::vk
 		}
 	}
 
-}
+} // namespace scop::vk
