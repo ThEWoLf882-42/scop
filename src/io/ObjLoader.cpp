@@ -64,7 +64,7 @@ namespace scop::io
 			const float vv = (v.pos[B] - mn[B]) / ext[B];
 
 			v.uv[0] = clamp01(u);
-			v.uv[1] = clamp01(1.0f - vv); // flip V (usually matches image top-down)
+			v.uv[1] = clamp01(vv); // flip V (usually matches image top-down)
 		}
 	}
 
