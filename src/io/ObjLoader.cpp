@@ -1,14 +1,72 @@
 #include "scop/io/ObjLoader.hpp"
+#include <algorithm>
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
 #include <stdexcept>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace scop::io
 {
+	static inline float clamp01(float x)
+	{
+		if (x < 0.f)
+			return 0.f;
+		if (x > 1.f)
+			return 1.f;
+		return x;
+	}
+
+	// Planar projection using the 2 largest bbox axes (works great for extruded logos)
+	static void applyAutoUV(std::vector<scop::vk::Vertex> &verts)
+	{
+		if (verts.empty())
+			return;
+
+		float mn[3] = {
+			std::numeric_limits<float>::infinity(),
+			std::numeric_limits<float>::infinity(),
+			std::numeric_limits<float>::infinity()};
+		float mx[3] = {
+			-std::numeric_limits<float>::infinity(),
+			-std::numeric_limits<float>::infinity(),
+			-std::numeric_limits<float>::infinity()};
+
+		for (const auto &v : verts)
+		{
+			for (int i = 0; i < 3; ++i)
+			{
+				mn[i] = std::min(mn[i], v.pos[i]);
+				mx[i] = std::max(mx[i], v.pos[i]);
+			}
+		}
+
+		float ext[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
+		// avoid divide by zero
+		for (int i = 0; i < 3; ++i)
+			if (ext[i] < 1e-6f)
+				ext[i] = 1.0f;
+
+		// pick 2 largest axes
+		int ax[3] = {0, 1, 2};
+		std::sort(ax, ax + 3, [&](int a, int b)
+				  { return ext[a] > ext[b]; });
+		const int A = ax[0];
+		const int B = ax[1];
+
+		for (auto &v : verts)
+		{
+			const float u = (v.pos[A] - mn[A]) / ext[A];
+			const float vv = (v.pos[B] - mn[B]) / ext[B];
+
+			v.uv[0] = clamp01(u);
+			v.uv[1] = clamp01(1.0f - vv); // flip V (usually matches image top-down)
+		}
+	}
 
 	static std::string dirOf(const std::string &p)
 	{
@@ -245,6 +303,9 @@ namespace scop::io
 
 	MeshData loadObj(const std::string &objPath, bool triangulate)
 	{
+		bool sawVT = false;
+		bool usedUV = false;
+
 		std::ifstream f(objPath);
 		if (!f)
 			throw std::runtime_error("OBJ open failed: " + objPath);
@@ -302,6 +363,7 @@ namespace scop::io
 				V2 t{};
 				ss >> t.u >> t.v;
 				uvs.push_back(t);
+				sawVT = true;
 				continue;
 			}
 			if (startsWith(line, "f "))
@@ -347,6 +409,7 @@ namespace scop::io
 
 						if (t >= 0)
 						{
+							usedUV = true;
 							const V2 T = uvs.at((size_t)t);
 							v.uv[0] = T.u;
 							v.uv[1] = T.v;
@@ -380,6 +443,7 @@ namespace scop::io
 
 					if (t >= 0)
 					{
+						usedUV = true;
 						const V2 T = uvs.at((size_t)t);
 						v.uv[0] = T.u;
 						v.uv[1] = T.v;
@@ -431,6 +495,12 @@ namespace scop::io
 			out.material = parseMtlFile(mtlPath, firstUseMtl);
 		}
 
+		// Auto-UV fallback: if OBJ has no vt (or faces don't reference them), generate planar UVs.
+		if (!sawVT || !usedUV)
+		{
+			std::cout << "[OBJ] UV missing -> AutoUV fallback enabled\n";
+			applyAutoUV(out.vertices);
+		}
 		return out;
 	}
 
