@@ -143,6 +143,12 @@ namespace scop::vk
 		float matAlpha_ = 1.f;
 		float matSpecStrength_ = 0.0f;
 		float matShininess_ = 32.0f;
+
+		// Texture toggle + smooth transition
+		bool tWasDown_ = false;
+		bool showTexture_ = true;	// target state
+		float texMix_ = 1.0f;		// current [0..1]
+		float texMixTarget_ = 1.0f; // target [0..1]
 	};
 
 } // namespace scop::vk

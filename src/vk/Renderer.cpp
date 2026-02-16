@@ -25,6 +25,7 @@ namespace
 		float baseColor[4];
 		float cameraPos[4];
 		float spec[4];
+		float texMix[4];
 	};
 
 	static inline float degToRad(float d) { return d * 3.14159265f / 180.0f; }
@@ -271,6 +272,7 @@ namespace scop::vk
 		modelLabel_ = baseName(path);
 
 		// Texture (from MTL map_Kd)
+		texPath = mesh.material.mapKd;
 		try
 		{
 			if (!texPath.empty())
@@ -279,6 +281,9 @@ namespace scop::vk
 						  ctx_.indices().graphicsFamily.value(), ctx_.graphicsQueue(),
 						  texPath);
 				texLabel_ = baseName(texPath);
+				showTexture_ = !texPath.empty(); // if no texture in MTL, start in color mode
+				texMixTarget_ = showTexture_ ? 1.0f : 0.0f;
+				texMix_ = texMixTarget_;
 			}
 			else
 			{
@@ -393,12 +398,21 @@ namespace scop::vk
 				if (!self)
 					return;
 
-				bool rotating = self->cursorLocked_;
-				if (!rotating && self->orbitMode_)
+				const bool lmb = (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
+				const bool rmb = (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+
+				// FPS: rotate whenever cursor is locked
+				// ORBIT + cursor free: rotate only while LMB, pan only while RMB
+				bool rotate = self->cursorLocked_;
+				bool pan = false;
+
+				if (self->orbitMode_ && !self->cursorLocked_)
 				{
-					rotating = (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+					rotate = lmb;
+					pan = rmb;
 				}
-				if (!rotating)
+
+				if (!rotate && !pan)
 				{
 					self->firstMouse_ = true;
 					return;
@@ -417,10 +431,35 @@ namespace scop::vk
 				self->lastMouseX_ = xpos;
 				self->lastMouseY_ = ypos;
 
-				const float sens = 0.12f;
-				self->yawDeg_ += static_cast<float>(dx) * sens;
-				self->pitchDeg_ -= static_cast<float>(dy) * sens;
-				self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
+				if (rotate)
+				{
+					const float sens = 0.12f;
+					self->yawDeg_ += static_cast<float>(dx) * sens;
+					self->pitchDeg_ -= static_cast<float>(dy) * sens;
+					self->pitchDeg_ = std::clamp(self->pitchDeg_, -89.0f, 89.0f);
+				}
+				else if (pan && self->orbitMode_)
+				{
+					// Pan orbit target using camera right/up vectors
+					const float yaw = degToRad(self->yawDeg_);
+					const float pitch = degToRad(self->pitchDeg_);
+
+					scop::math::Vec3 forward{
+						std::cos(pitch) * std::cos(yaw),
+						std::sin(pitch),
+						std::cos(pitch) * std::sin(yaw)};
+					forward = scop::math::normalize(forward);
+
+					const scop::math::Vec3 worldUp{0.f, 1.f, 0.f};
+					scop::math::Vec3 right = scop::math::normalize(scop::math::cross(forward, worldUp));
+					scop::math::Vec3 up = scop::math::cross(right, forward);
+
+					const float panSens = 0.0020f * std::max(self->orbitDistance_, 1.0f);
+
+					self->orbitTargetX_ += (-right.x * static_cast<float>(dx) + up.x * static_cast<float>(dy)) * panSens;
+					self->orbitTargetY_ += (-right.y * static_cast<float>(dx) + up.y * static_cast<float>(dy)) * panSens;
+					self->orbitTargetZ_ += (-right.z * static_cast<float>(dx) + up.z * static_cast<float>(dy)) * panSens;
+				}
 			});
 
 		glfwSetDropCallback(
@@ -668,6 +707,23 @@ namespace scop::vk
 		plusWasDown_ = plusDown;
 		minusWasDown_ = minusDown;
 
+		// T toggles textured vs flat (smooth fade)
+		const bool tDown = glfwGetKey(ctx_.window(), GLFW_KEY_T) == GLFW_PRESS;
+		if (tDown && !tWasDown_)
+		{
+			showTexture_ = !showTexture_;
+			texMixTarget_ = showTexture_ ? 1.0f : 0.0f;
+		}
+		tWasDown_ = tDown;
+
+		// Smoothly approach target (nice exponential ease)
+		{
+			const float speed = 10.0f; // higher = faster fade
+			const float k = 1.0f - std::exp(-speed * dt);
+			texMix_ = texMix_ + (texMixTarget_ - texMix_) * k;
+			texMix_ = std::clamp(texMix_, 0.0f, 1.0f);
+		}
+
 		// F1 wireframe toggle
 		const bool f1Down = glfwGetKey(ctx_.window(), GLFW_KEY_F1) == GLFW_PRESS;
 		if (f1Down && !f1WasDown_)
@@ -823,7 +879,7 @@ namespace scop::vk
 			oss.precision(1);
 
 			oss << "scop | " << modelLabel_
-				<< " | TEX " << texLabel_
+				<< " | TEX " << texLabel_ << (showTexture_ ? " ON" : " OFF")
 				<< " | " << (orbitMode_ ? "ORBIT" : "FPS")
 				<< " | FPS " << fps
 				<< " | " << (wireframe_ ? "WF" : "FILL")
@@ -897,6 +953,10 @@ namespace scop::vk
 		u.spec[1] = matShininess_;
 		u.spec[2] = 0.0f;
 		u.spec[3] = 0.0f;
+		u.texMix[0] = texMix_;
+		u.texMix[1] = 0.0f;
+		u.texMix[2] = 0.0f;
+		u.texMix[3] = 0.0f;
 
 		ubos_.at(imageIndex).update(&u, sizeof(u));
 
