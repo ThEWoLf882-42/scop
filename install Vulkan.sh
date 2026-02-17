@@ -10,9 +10,8 @@ ROOT="$GO/VulkanSDK/$VER"
 # 1) sanity check
 if [ ! -f "$ZIP" ]; then
   echo "ZIP not found: $ZIP"
-  echo "Available zips:"
-  ls -lh "$GO"/*.zip 2>/dev/null || true
-  exit 1
+  echo "Downloading from LunarG SDK site..."
+  curl -L -o "$ZIP" "https://sdk.lunarg.com/sdk/download/${VER}/mac/vulkansdk-macos-${VER}.zip"
 fi
 
 # 2) fresh extract
@@ -54,7 +53,11 @@ if [ ! -f "$ROOT/setup-env.sh" ]; then
   exit 1
 fi
 
-# 7) load env + test
+# 7) Cleanup
+rm -rf "$EXTRACT"
+rm -f "$ZIP"
+
+# 8) load env + test
 source "$ROOT/setup-env.sh"
 echo "VULKAN_SDK=$VULKAN_SDK"
 command -v vulkaninfo || true

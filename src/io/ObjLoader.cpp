@@ -1,16 +1,13 @@
 #include "scop/io/ObjLoader.hpp"
-
-#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <stdexcept>
 #include <cctype>
 #include <cmath>
-#include <fstream>
-#include <iostream>
-#include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <unordered_map>
 #include <vector>
+#include <limits>
+#include <algorithm>
 
 namespace scop::io
 {
@@ -23,9 +20,9 @@ namespace scop::io
 		return x;
 	}
 
-	static inline float absf(float x) { return x < 0.f ? -x : x; }
-
-	// Planar projection using the 2 largest bbox axes (fallback).
+	// Box mapping based on dominant normal axis.
+	// This fixes "texture only visible on some angles" when OBJ has no UVs (vt=0),
+	// because planar mapping collapses on thin axes for extruded shapes.
 	static void applyAutoUV(std::vector<scop::vk::Vertex> &verts)
 	{
 		if (verts.empty())
@@ -50,23 +47,42 @@ namespace scop::io
 		}
 
 		float ext[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
+		// avoid divide by zero
 		for (int i = 0; i < 3; ++i)
 			if (ext[i] < 1e-6f)
 				ext[i] = 1.0f;
 
-		int ax[3] = {0, 1, 2};
-		std::sort(ax, ax + 3, [&](int a, int b)
-				  { return ext[a] > ext[b]; });
-		const int A = ax[0];
-		const int B = ax[1];
-
 		for (auto &v : verts)
 		{
-			const float u = (v.pos[A] - mn[A]) / ext[A];
-			const float vv = (v.pos[B] - mn[B]) / ext[B];
+			const float nx = std::fabs(v.nrm[0]);
+			const float ny = std::fabs(v.nrm[1]);
+			const float nz = std::fabs(v.nrm[2]);
+
+			float u = 0.f;
+			float vv = 0.f;
+
+			// choose projection plane by dominant normal axis
+			if (nx >= ny && nx >= nz)
+			{
+				// ±X face -> project on (Z,Y)
+				u = (v.pos[2] - mn[2]) / ext[2];
+				vv = (v.pos[1] - mn[1]) / ext[1];
+			}
+			else if (ny >= nx && ny >= nz)
+			{
+				// ±Y face -> project on (X,Z)
+				u = (v.pos[0] - mn[0]) / ext[0];
+				vv = (v.pos[2] - mn[2]) / ext[2];
+			}
+			else
+			{
+				// ±Z face -> project on (X,Y)
+				u = (v.pos[0] - mn[0]) / ext[0];
+				vv = (v.pos[1] - mn[1]) / ext[1];
+			}
 
 			v.uv[0] = clamp01(u);
-			v.uv[1] = clamp01(vv); // flip V (if upside down, use clamp01(vv))
+			v.uv[1] = clamp01(1.0f - vv); // flip V (if upside down, use clamp01(vv))
 		}
 	}
 
@@ -105,7 +121,7 @@ namespace scop::io
 		if (p[0] == '/')
 			return true;
 		if (p.size() > 2 && std::isalpha(static_cast<unsigned char>(p[0])) && p[1] == ':')
-			return true;
+			return true; // windows drive
 		return false;
 	}
 
@@ -118,44 +134,9 @@ namespace scop::io
 		float u, v;
 	};
 
-	// Cube-style per-face projection: choose plane based on dominant normal axis.
-	static void setAutoUVCube(scop::vk::Vertex &v,
-							  const V3 &P,
-							  const V3 &faceN,
-							  const float mn[3],
-							  const float mx[3])
-	{
-		float ext[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
-		for (int i = 0; i < 3; ++i)
-			if (ext[i] < 1e-6f)
-				ext[i] = 1.0f;
-
-		const float ax = absf(faceN.x), ay = absf(faceN.y), az = absf(faceN.z);
-
-		float u = 0.f, vv = 0.f;
-
-		if (az >= ax && az >= ay) // Z -> XY
-		{
-			u = (P.x - mn[0]) / ext[0];
-			vv = (P.y - mn[1]) / ext[1];
-		}
-		else if (ax >= ay && ax >= az) // X -> ZY
-		{
-			u = (P.z - mn[2]) / ext[2];
-			vv = (P.y - mn[1]) / ext[1];
-		}
-		else // Y -> XZ
-		{
-			u = (P.x - mn[0]) / ext[0];
-			vv = (P.z - mn[2]) / ext[2];
-		}
-
-		v.uv[0] = clamp01(u);
-		v.uv[1] = clamp01(vv); // if upside down: clamp01(vv)
-	}
-
 	static int fixIndex(int idx, int n)
 	{
+		// OBJ indices: 1..n, or negative = relative to end
 		if (idx > 0)
 			return idx - 1;
 		if (idx < 0)
@@ -166,6 +147,7 @@ namespace scop::io
 	static void parseFaceToken(const std::string &tok, int &vi, int &ti, int &ni)
 	{
 		vi = ti = ni = 0;
+		// v/vt/vn or v//vn or v/vt or v
 		const size_t a = tok.find('/');
 		if (a == std::string::npos)
 		{
@@ -176,11 +158,13 @@ namespace scop::io
 		vi = std::stoi(tok.substr(0, a));
 		if (b == std::string::npos)
 		{
+			// v/vt
 			std::string s1 = tok.substr(a + 1);
 			if (!s1.empty())
 				ti = std::stoi(s1);
 			return;
 		}
+		// v/vt/vn OR v//vn
 		std::string s1 = tok.substr(a + 1, b - (a + 1));
 		std::string s2 = tok.substr(b + 1);
 		if (!s1.empty())
@@ -193,12 +177,10 @@ namespace scop::io
 	{
 		const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
 		const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
-
 		V3 n{};
 		n.x = uy * vz - uz * vy;
 		n.y = uz * vx - ux * vz;
 		n.z = ux * vy - uy * vx;
-
 		const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
 		if (len > 0.000001f)
 		{
@@ -209,7 +191,8 @@ namespace scop::io
 		return n;
 	}
 
-	// Choose last token that doesn't start with '-'
+	// Tries to extract filename from map_Kd line that may contain options.
+	// For our needs: choose last token that doesn't start with '-'.
 	static std::string parseMapLine(const std::string &rest)
 	{
 		std::istringstream ss(rest);
@@ -253,6 +236,7 @@ namespace scop::io
 			}
 			else if (wantName.empty() && out.name.empty())
 			{
+				// if no requested material, take the first
 				out = current;
 			}
 		};
@@ -266,6 +250,7 @@ namespace scop::io
 			if (startsWith(line, "newmtl "))
 			{
 				commitIfWanted(false);
+
 				currentName = trimLeft(line.substr(7));
 				current = Material{};
 				current.name = currentName;
@@ -329,8 +314,6 @@ namespace scop::io
 	MeshData loadObj(const std::string &objPath, bool triangulate)
 	{
 		bool sawVT = false;
-		bool usedUV = false;
-		bool generatedUV = false;
 
 		std::ifstream f(objPath);
 		if (!f)
@@ -341,16 +324,6 @@ namespace scop::io
 		std::vector<V3> positions;
 		std::vector<V3> normals;
 		std::vector<V2> uvs;
-
-		// BBox for AutoUV
-		float bboxMn[3] = {
-			std::numeric_limits<float>::infinity(),
-			std::numeric_limits<float>::infinity(),
-			std::numeric_limits<float>::infinity()};
-		float bboxMx[3] = {
-			-std::numeric_limits<float>::infinity(),
-			-std::numeric_limits<float>::infinity(),
-			-std::numeric_limits<float>::infinity()};
 
 		std::string mtllib;
 		std::string firstUseMtl;
@@ -383,14 +356,6 @@ namespace scop::io
 				V3 v{};
 				ss >> v.x >> v.y >> v.z;
 				positions.push_back(v);
-
-				bboxMn[0] = std::min(bboxMn[0], v.x);
-				bboxMx[0] = std::max(bboxMx[0], v.x);
-				bboxMn[1] = std::min(bboxMn[1], v.y);
-				bboxMx[1] = std::max(bboxMx[1], v.y);
-				bboxMn[2] = std::min(bboxMn[2], v.z);
-				bboxMx[2] = std::max(bboxMx[2], v.z);
-
 				continue;
 			}
 			if (startsWith(line, "vn "))
@@ -437,8 +402,8 @@ namespace scop::io
 					const int t = (ti != 0) ? fixIndex(ti, (int)uvs.size()) : -1;
 					const int n = (ni != 0) ? fixIndex(ni, (int)normals.size()) : -1;
 
-					// If no vn OR no vt -> do not cache across faces (UV depends on face projection)
-					if (n < 0 || t < 0)
+					// If no vn in token -> do not cache across faces (flat normal)
+					if (n < 0)
 					{
 						scop::vk::Vertex v{};
 						const V3 P = positions.at((size_t)p);
@@ -446,34 +411,28 @@ namespace scop::io
 						v.pos[1] = P.y;
 						v.pos[2] = P.z;
 
-						V3 N = hasFaceNrm ? faceNrm : V3{0.f, 1.f, 0.f};
-						if (n >= 0)
-							N = normals.at((size_t)n);
-
+						const V3 N = hasFaceNrm ? faceNrm : V3{0.f, 1.f, 0.f};
 						v.nrm[0] = N.x;
 						v.nrm[1] = N.y;
 						v.nrm[2] = N.z;
 
 						if (t >= 0)
 						{
-							usedUV = true;
 							const V2 T = uvs.at((size_t)t);
 							v.uv[0] = T.u;
 							v.uv[1] = T.v;
 						}
 						else
 						{
-							// AutoUV per-face
-							generatedUV = true;
-							const V3 projN = hasFaceNrm ? faceNrm : N;
-							setAutoUVCube(v, P, projN, bboxMn, bboxMx);
+							v.uv[0] = 0.f;
+							v.uv[1] = 0.f;
 						}
 
 						out.vertices.push_back(v);
 						return (uint32_t)(out.vertices.size() - 1);
 					}
 
-					// cache key for smooth data (v/vt/vn)
+					// cache key for smooth data
 					std::string key = std::to_string(vi) + "/" + std::to_string(ti) + "/" + std::to_string(ni);
 					auto it = cache.find(key);
 					if (it != cache.end())
@@ -490,10 +449,17 @@ namespace scop::io
 					v.nrm[1] = N.y;
 					v.nrm[2] = N.z;
 
-					usedUV = true;
-					const V2 T = uvs.at((size_t)t);
-					v.uv[0] = T.u;
-					v.uv[1] = T.v;
+					if (t >= 0)
+					{
+						const V2 T = uvs.at((size_t)t);
+						v.uv[0] = T.u;
+						v.uv[1] = T.v;
+					}
+					else
+					{
+						v.uv[0] = 0.f;
+						v.uv[1] = 0.f;
+					}
 
 					out.vertices.push_back(v);
 					const uint32_t idx = (uint32_t)(out.vertices.size() - 1);
@@ -529,24 +495,15 @@ namespace scop::io
 			}
 		}
 
+		// If OBJ has no UVs, generate them
+		if (!sawVT)
+			applyAutoUV(out.vertices);
+
 		// MTL parsing (always use it if present)
 		if (!mtllib.empty())
 		{
 			const std::string mtlPath = looksAbsolutePath(mtllib) ? mtllib : (objDir + mtllib);
 			out.material = parseMtlFile(mtlPath, firstUseMtl);
-		}
-
-		// If OBJ had no UVs or faces didn't reference UVs, we already generated per-face UVs.
-		// If for some reason we didn't generate (no faces), planar fallback keeps things safe.
-		if (!sawVT || !usedUV)
-		{
-			if (generatedUV)
-				std::cout << "[OBJ] UV missing -> AutoUV cube-per-face enabled\n";
-			else
-			{
-				std::cout << "[OBJ] UV missing -> AutoUV planar fallback enabled\n";
-				applyAutoUV(out.vertices);
-			}
 		}
 
 		return out;
