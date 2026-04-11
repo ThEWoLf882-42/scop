@@ -1,0 +1,27 @@
+# Executable
+scop
+
+# Build output
+build/
+*.o
+*.d
+
+# Shader binaries
+*.spv
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Optional local env / temp
+*.tmp
+*.swp
+
+# PDF documentation
+*.PDF
