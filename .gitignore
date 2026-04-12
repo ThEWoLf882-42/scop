@@ -25,3 +25,6 @@ build/
 
 # PDF documentation
 *.PDF
+
+# Skiped OBJs
+bugatti.*
