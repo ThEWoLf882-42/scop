@@ -44,8 +44,8 @@ namespace scop
 		void run(const std::string &modelPath, const std::string &texturePath);
 
 	private:
-		static constexpr uint32_t WIDTH = 1280U;
-		static constexpr uint32_t HEIGHT = 720U;
+		static constexpr uint32_t WIDTH = 1920U;
+		static constexpr uint32_t HEIGHT = 1080U;
 		static constexpr std::size_t MAX_FRAMES_IN_FLIGHT = 2U;
 
 		static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
